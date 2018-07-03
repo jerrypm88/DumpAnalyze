@@ -503,7 +503,6 @@ void CDumpAnalyze::InitDownloadFolder(std::string& strFloder, const wchar_t* str
 	PathAppend(szFolder, from.c_str());
 
 	PathAddBackslash(szFolder);
-	//StringCchCat(szFolder, MAX_PATH, strAppendix);
 
 	CString strFolder;
 
@@ -512,7 +511,6 @@ void CDumpAnalyze::InitDownloadFolder(std::string& strFloder, const wchar_t* str
 	
 	strFolder.Format(L"%s%04d-%02d-%02d %02d-%02d-%02d", szFolder, time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
 	
-	//Util::File::DeleteDirectoryEx(strFolder);
 	strFolder += L"\\";
 	SHCreateDirectory(NULL, strFolder);
 	strFloder = (CW2A)strFolder;
