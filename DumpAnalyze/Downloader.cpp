@@ -333,7 +333,7 @@ void CDumpAnalyze::Reset()
 {
 	m_hWorkThread = nullptr;
 	m_nFailCounts = 0;
-	m_mapDumpInfo.clear();
+	m_mapDumpResult.clear();
 	m_lstDumpInfo.clear();
 	m_mapCallStack.clear();
 }
@@ -357,7 +357,7 @@ void AnalyzeDumpThreadProc(void *pThis)
 
 void CDumpAnalyze::AnalyzeDumpThread()
 {
-	std::string url;
+	DUMP_INFO dump_info;
 
 	while (true)
 	{
@@ -373,7 +373,7 @@ void CDumpAnalyze::AnalyzeDumpThread()
 			m_lstDumpInfo.pop_front();
 			if (pInfo)
 			{
-				url = pInfo->url;
+				dump_info = *pInfo;
 				delete pInfo;
 			}
 		}
@@ -381,7 +381,7 @@ void CDumpAnalyze::AnalyzeDumpThread()
 		m_currentCount++;
 
 		UpdateProcess(PT_ANALYZING, m_currentCount);
-		std::string name = PathFindFileNameA(url.c_str());
+		std::string name = PathFindFileNameA(dump_info.url.c_str());
 		std::string path = g_szWorkingFolder;
 		path += "dump\\";
 
@@ -391,10 +391,10 @@ void CDumpAnalyze::AnalyzeDumpThread()
 		}
 
 		path += name;
-		std::string dumpPath = DumploadAndUnzipDump(url, path, g_szWorkingFolder + "dump\\");
+		std::string dumpPath = DumploadAndUnzipDump(dump_info, path, g_szWorkingFolder + "dump\\");
 		if (dumpPath.length() > 0 && PathFileExistsA(dumpPath.c_str()))
 		{
-			AnalyzeDump(dumpPath);
+			AnalyzeDump(dump_info, dumpPath);
 		}
 	}
 
@@ -479,13 +479,9 @@ void CDumpAnalyze::WorkImpl()
 			t.join();
 		}
 
-// 		CStringA strDumpResultPath;
-// 		strDumpResultPath.Format("%s\\%s", foler.c_str(), RESULT_FILE_NAME);
-// 		WriteResult(strDumpResultPath);
 
-		CStringA strHtmResult;
-		strHtmResult.Format("%s\\%s", foler.c_str(), "result.html");
-		WriteResultHtml(strHtmResult);
+		OutputResult(foler);
+
 		UpdateProcess(PT_DONE, 0);
 	}
 	else
@@ -516,7 +512,7 @@ void CDumpAnalyze::InitDownloadFolder(std::string& strFloder, const wchar_t* str
 	strFloder = (CW2A)strFolder;
 }
 
-std::string CDumpAnalyze::DumploadAndUnzipDump(std::string& url, std::string& path,std::string& folder)
+std::string CDumpAnalyze::DumploadAndUnzipDump(const DUMP_INFO & dump_info, std::string& path,std::string& folder)
 {
 	LOG << "Begin down:" << path.c_str();
 	CURL *pCurl = NULL;
@@ -526,7 +522,7 @@ std::string CDumpAnalyze::DumploadAndUnzipDump(std::string& url, std::string& pa
 	{
 		curl_easy_setopt(pCurl, CURLOPT_WRITEDATA, (void*)pFile);
 		curl_easy_setopt(pCurl, CURLOPT_WRITEFUNCTION, WriteFunc);
-		curl_easy_setopt(pCurl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(pCurl, CURLOPT_URL, dump_info.url.c_str());
 		curl_easy_perform(pCurl);
 		curl_easy_cleanup(pCurl);
 
@@ -556,7 +552,7 @@ std::string CDumpAnalyze::DumploadAndUnzipDump(std::string& url, std::string& pa
 	return "";
 }
 
-BOOL CDumpAnalyze::AnalyzeDump(std::string& path)
+BOOL CDumpAnalyze::AnalyzeDump(const DUMP_INFO & dump_info, std::string& path)
 {
 	std::wstring cdb_path = DUMP_ANALYZE_EXE_PATH;
 	CCommandLine::getInstance().getOption(L"cdb", cdb_path);
@@ -641,17 +637,37 @@ BOOL CDumpAnalyze::AnalyzeDump(std::string& path)
 	//{
 	//	strTag = strCallStack;
 	//}
-	ArrangeDumpInfo(strTag, strCallStack, path.c_str());
+	ArrangeDumpInfo(strTag, strCallStack, path.c_str(), dump_info);
 	return TRUE;
 }
 
-void CDumpAnalyze::ArrangeDumpInfo(CStringA strTag, CStringA strCallStack, CStringA strPath)
+void CDumpAnalyze::ArrangeDumpInfo(CStringA strTag, CStringA strCallStack, CStringA strPath, const DUMP_INFO & dump_info)
 {
 	std::lock_guard<std::mutex> lock(m_resultMutex);
+
+	VER_TAG_RESULT_ITERATOR it_tag_result = ver_tag_result_.find(dump_info.ver);
+	if (it_tag_result == ver_tag_result_.end()){
+		TAG_DUMP_RESULT tag_result;
+		tag_result[strTag].push_back(strTag);
+		tag_result[strTag].push_back(strPath);
+		ver_tag_result_[dump_info.ver] = tag_result;
+	}
+	else {
+		TAG_DUMP_RESULT &tag_result = it_tag_result->second;
+		TAG_DUMP_RESULT_ITERATOR it = tag_result.find(strTag);
+		if (it == tag_result.end()){
+			tag_result[strTag].push_back(strTag);
+		}
+		tag_result[strTag].push_back(strPath);
+	}
+
+
 	//第一个写tag，方便分类
-	if (m_mapDumpInfo.find(strTag) == m_mapDumpInfo.end())
-		m_mapDumpInfo[strTag].push_back(strTag);
-	m_mapDumpInfo[strTag].push_back(strPath);
+ 	if (m_mapDumpResult.find(strTag) == m_mapDumpResult.end())
+ 		m_mapDumpResult[strTag].push_back(strTag);
+	m_mapDumpResult[strTag].push_back(strPath);
+
+	//<tag, callstack>
 	if (m_mapCallStack.find(strTag) == m_mapCallStack.end())
 		m_mapCallStack[strTag] = strCallStack;
 }
@@ -661,68 +677,21 @@ bool SortByCount(list<CStringA>* pLeft, list<CStringA>* pRight)
 	return pLeft->size() > pRight->size();
 }
 
-void CDumpAnalyze::WriteResult(CStringA strPath)
-{
-	int nDumpCounts = 0;
-	std::list<list<CStringA>*> lstToSort;
-	std::map<CStringA, list<CStringA>>::iterator iter = m_mapDumpInfo.begin();
-	while (iter != m_mapDumpInfo.end())
-	{
-		lstToSort.push_back(&(iter->second));
-		nDumpCounts += (iter->second.size() - 1);
-		iter++;
-	}
-	lstToSort.sort(SortByCount);
-	FILE* pFile = fopen(strPath, "wb");
-	if (pFile != NULL)
-	{
-		//1.counts
-		CStringA strCounts;
-		strCounts.Format("Analyzed  %d  dump...\r\n\r\n", nDumpCounts);
-		fwrite(strCounts, sizeof(char), strCounts.GetLength(), pFile);
-		//2 top20
-		int i = 0;
-		std::list<list<CStringA>*>::iterator iter = lstToSort.begin();
-		while (iter != lstToSort.end() && i < MAX_SHOW_RANKS)
-		{
-			list<CStringA>* pList = *iter;
 
-			CStringA strDesc;
-			strDesc.Format("Top %d: total counts = %d\r\n\r\n", i + 1, pList->size() - 1);
-			fwrite(strDesc, sizeof(char), strDesc.GetLength(), pFile);
-			if (pList)
-			{
-				list<CStringA>::iterator iterDumpInfo = pList->begin();
-				CStringA strTag;
-				CStringA strCallStack;
-				int nIndex = 0;
-				while (iterDumpInfo != pList->end())
-				{
-					if (nIndex == 0)
-					{ 
-						strTag = *iterDumpInfo;
-						strCallStack = m_mapCallStack[strTag];
-						fwrite(strCallStack, sizeof(char), strCallStack.GetLength(), pFile);
-					}
-					else
-					{
-						if (nIndex > MAX_SHOW_LOCAL_PATH_COUNTS)
-							break;
-						CStringA strLocalPath = *iterDumpInfo;
-						fwrite(strLocalPath, sizeof(char), strLocalPath.GetLength(), pFile);
-					}
-					fwrite("\r\n", sizeof(char), 1, pFile);
-					iterDumpInfo++;
-					nIndex++;
-				}
-			}
-			fwrite("\r\n\r\n", sizeof(char), 2, pFile);
-			iter++;
-			i++;
-		}
-		fclose(pFile);
+void CDumpAnalyze::OutputResult(const std::string & folder)
+{
+	VER_TAG_RESULT_ITERATOR it = ver_tag_result_.begin();
+	for (; it != ver_tag_result_.end(); ++it)
+	{
+		//3.0.0.1001-result.html
+		CStringA strHtmResult;
+		strHtmResult.Format("%s\\%s-%s", folder.c_str(), it->first.c_str(), "result.html");
+		WriteResultHtml(strHtmResult, it->second);
 	}
-	return;
+	
+	CStringA strHtmResult;
+	strHtmResult.Format("%s\\%s", folder.c_str(), "result.html");
+	WriteResultHtml(strHtmResult, m_mapDumpResult);
 }
 
 #define HTML_HEAD "<!DOCTYPE html>\
@@ -734,12 +703,12 @@ void CDumpAnalyze::WriteResult(CStringA strPath)
 
 #define BODY_HEAD_END "</body></html>"
 
-void CDumpAnalyze::WriteResultHtml(CStringA strPath)
+void CDumpAnalyze::WriteResultHtml(CStringA strPath, TAG_DUMP_RESULT & tag_result)
 {
 	int nDumpCounts = 0;
 	std::list<list<CStringA>*> lstToSort;
-	std::map<CStringA, list<CStringA>>::iterator iter = m_mapDumpInfo.begin();
-	while (iter != m_mapDumpInfo.end())
+	std::map<CStringA, list<CStringA>>::iterator iter = tag_result.begin();
+	while (iter != tag_result.end())
 	{
 		lstToSort.push_back(&(iter->second));
 		nDumpCounts += (iter->second.size() - 1);
