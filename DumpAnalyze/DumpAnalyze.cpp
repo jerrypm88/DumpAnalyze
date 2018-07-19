@@ -4,7 +4,7 @@
 #include "stdafx.h"
 
 #include "resource.h"
-
+#include "Common/LdsDisableWow64FsRedirection.h"
 #include "aboutdlg.h"
 #include "MainDlg.h"
 
@@ -47,6 +47,8 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
 	hRes = _Module.Init(NULL, hInstance);
 	ATLASSERT(SUCCEEDED(hRes));
 
+	//一开始就关掉重定位！
+	DISABLED_WOW64_FS_REDIRECTION();
 	int nRet = Run(lpstrCmdLine, nCmdShow);
 
 	_Module.Term();

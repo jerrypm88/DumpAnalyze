@@ -3,6 +3,9 @@
 /////////////////////////////////////////////////////////////////////////////
 
 #pragma once
+#include "stdafx.h"
+
+
 
 class CAboutDlg : public CDialogImpl<CAboutDlg>
 {

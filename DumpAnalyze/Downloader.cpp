@@ -6,6 +6,19 @@
 #include <wininet.h>
 #include <strsafe.h>
 #include <atltime.h>
+#include <atlcomcli.h>
+#include <urlmon.h>
+#include "lib/json/lib_json/json/value.h"
+#include "lib/json/lib_json/json/reader.h"
+#include <corecrt_wstdio.h>
+#include "Utils.h"
+#include <algorithm>
+#include "Common/VersionHelpers.h"
+#include "UrlMonAdapter.h"
+#include <fstream>
+#include "md5_ex.h"
+
+
 #ifdef _DEBUG
 	#pragma comment(lib,"libcurld.lib")
 #else
@@ -15,15 +28,12 @@
 #pragma comment ( lib, "ws2_32.lib" )
 #pragma comment ( lib, "winmm.lib" )
 #pragma comment ( lib, "wldap32.lib" )
-
-#include <atlcomcli.h>
-#include <urlmon.h>
-#include "lib/json/lib_json/json/value.h"
-#include "lib/json/lib_json/json/reader.h"
-#include <corecrt_wstdio.h>
-#include "Utils.h"
-#include <algorithm>
+#pragma comment ( lib, "Version.lib" )
+#pragma comment ( lib, "sqlite3.lib" )
 #pragma comment(lib, "UrlMon.lib")
+
+
+
 
 #define DAY_FORMAT					"%d-%d-%d"
 #define POST_PARAM					L"src=%s&date=%s"
@@ -40,11 +50,17 @@
 
 CDumpAnalyze::CDumpAnalyze(void)
 {
+	m_pSqliteDb = NULL;
 	curl_global_init(CURL_GLOBAL_ALL);
 }
 
 CDumpAnalyze::~CDumpAnalyze(void)
 {
+	if( m_pSqliteDb )
+	{
+		sqlite3_close(m_pSqliteDb);
+		m_pSqliteDb = NULL;
+	}
 	curl_global_cleanup();
 }
 
@@ -75,259 +91,6 @@ int CDumpAnalyze::StartWorkThread(HWND hWnd)
 	}
 	return -1;
 }
-
-class CUrlMonAdapter :
-	public IBindStatusCallback,
-	public IHttpNegotiate,
-	public IAuthenticate
-{
-public:
-	CUrlMonAdapter() : m_cRef(0), m_bEnd(FALSE), m_dwRetCode(200), m_hWaitEvent(NULL) {}
-	virtual ~CUrlMonAdapter()
-	{
-		if (m_hWaitEvent)
-		{
-			CloseHandle(m_hWaitEvent);
-			m_hWaitEvent = NULL;
-		}
-	}
-	STDMETHOD_(ULONG, AddRef)() { return m_cRef++; }
-	STDMETHOD_(ULONG, Release)() { if (--m_cRef == 0) { delete this; return 0; } return m_cRef; }
-	STDMETHODIMP QueryInterface(REFIID riid, void** ppv)
-	{
-		if (riid == IID_IUnknown || riid == IID_IBindStatusCallback)
-		{
-			*ppv = (IBindStatusCallback*)this;
-			AddRef();
-			return S_OK;
-		}
-		else if (riid == IID_IHttpNegotiate)
-		{
-			*ppv = (IHttpNegotiate*)this;
-			AddRef();
-			return S_OK;
-		}
-		else if (riid == IID_IAuthenticate)
-		{
-			*ppv = (IAuthenticate*)this;
-			AddRef();
-			return S_OK;
-		}
-		else
-		{
-			*ppv = NULL;
-			return E_NOINTERFACE;
-		}
-	}
-	STDMETHODIMP BeginningTransaction(
-		LPCWSTR szURL,
-		LPCWSTR szHeaders,
-		DWORD dwReserved,
-		LPWSTR *pszAdditionalHeaders)
-	{
-		if (!pszAdditionalHeaders)
-			return E_POINTER;
-		*pszAdditionalHeaders = NULL;
-
-		if (BINDVERB_POST == m_dwAction && m_hDataToPost)
-		{
-			LPCWSTR c_wszHeaders = L"Content-Type: application/x-www-form-urlencoded\r\n";
-			int len = (wcslen(c_wszHeaders) + 1) * sizeof(WCHAR);
-			LPWSTR wszAdditionalHeaders = (LPWSTR)CoTaskMemAlloc(len);
-			if (!wszAdditionalHeaders)
-			{
-				return E_OUTOFMEMORY;
-			}
-			StringCbCopy(wszAdditionalHeaders, len, c_wszHeaders);
-			*pszAdditionalHeaders = wszAdditionalHeaders;
-		}
-		return S_OK;
-	}
-	STDMETHODIMP OnResponse(
-		DWORD dwResponseCode,
-		LPCWSTR szResponseHeaders,
-		LPCWSTR szRequestHeaders,
-		PWSTR *pszAdditionalRequestHeaders)
-	{
-		m_dwRetCode = dwResponseCode;
-		if (!pszAdditionalRequestHeaders)
-			return E_POINTER;
-		*pszAdditionalRequestHeaders = NULL;
-		return S_OK;
-	}
-	STDMETHODIMP OnStartBinding(DWORD dwReserved, IBinding *pib)
-	{
-		return S_OK;
-	}
-	STDMETHODIMP GetPriority(LONG *pnPriority)
-	{
-		HRESULT hr = S_OK;
-		if (pnPriority)
-			*pnPriority = THREAD_PRIORITY_NORMAL;
-		else
-			hr = E_INVALIDARG;
-		return hr;
-	}
-	STDMETHODIMP OnLowResource(DWORD reserved)
-	{
-		return S_OK;
-	}
-	STDMETHODIMP OnProgress(ULONG ulProgress, ULONG ulProgressMax, ULONG ulStatusCode, LPCWSTR szStatusText)
-	{
-		return S_OK;
-	}
-	STDMETHODIMP OnStopBinding(HRESULT hresult, LPCWSTR szError)
-	{
-		m_bEnd = TRUE;
-		m_hFinalResult = hresult;
-		if (m_hWaitEvent)
-			SetEvent(m_hWaitEvent);
-
-		m_spStream.Release();
-		return S_OK;
-	}
-	STDMETHODIMP GetBindInfo(DWORD *grfBINDF, BINDINFO *pbindinfo)
-	{
-		if (pbindinfo == NULL || pbindinfo->cbSize == 0 || grfBINDF == NULL)
-			return E_INVALIDARG;
-
-		*grfBINDF = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FWD_BACK;
-
-		ULONG cbSize = pbindinfo->cbSize;
-		memset(pbindinfo, 0, cbSize);
-		pbindinfo->cbSize = cbSize;
-		pbindinfo->dwBindVerb = m_dwAction;
-
-		if (m_dwAction == BINDVERB_POST)
-		{
-			pbindinfo->stgmedData.tymed = TYMED_HGLOBAL;
-			pbindinfo->stgmedData.hGlobal = m_hDataToPost;
-			pbindinfo->stgmedData.pUnkForRelease = (LPUNKNOWN)(LPBINDSTATUSCALLBACK)this;
-			pbindinfo->cbstgmedData = m_cbDataToPost;
-			AddRef();
-		}
-		return S_OK;
-	}
-	STDMETHODIMP OnObjectAvailable(REFIID riid, IUnknown *punk)
-	{
-		return S_OK;
-	}
-	BOOL StartDownload(LPCWSTR url, PBYTE pPostData, DWORD dwPostLen)
-	{
-
-		if (pPostData && dwPostLen)
-		{
-			m_cbDataToPost = dwPostLen;
-			m_hDataToPost = GlobalAlloc(GPTR, m_cbDataToPost);
-			if (!m_hDataToPost)
-				return FALSE;
-			memcpy(m_hDataToPost, pPostData, m_cbDataToPost);
-			m_dwAction = BINDVERB_POST;
-		}
-		else
-			m_dwAction = BINDVERB_GET;
-
-		CComPtr<IBindCtx> spBindCtx;
-		CComPtr<IMoniker> spMoniker;
-		CComPtr<IStream> spStream;
-
-		HRESULT hr = CreateURLMoniker(NULL, url, &spMoniker);
-		if (SUCCEEDED(hr))
-			hr = CreateBindCtx(0, &spBindCtx);
-		if (SUCCEEDED(hr))
-			hr = RegisterBindStatusCallback(spBindCtx, static_cast<IBindStatusCallback*>(this), NULL, 0);
-		if (SUCCEEDED(hr))
-			hr = spMoniker->BindToStorage(spBindCtx, 0, __uuidof(IStream), (void**)&spStream);
-		return SUCCEEDED(hr);
-	}
-
-	BOOL Download(LPCWSTR url, PBYTE pPostData, DWORD dwPostLen, DWORD dwTimeout)
-	{
-		if (!m_hWaitEvent && !(m_hWaitEvent = ::CreateEvent(NULL, TRUE, FALSE, NULL)))
-			return FALSE;
-
-		::ResetEvent(m_hWaitEvent);
-		if (!StartDownload(url, pPostData, dwPostLen))
-			return FALSE;
-
-		if (m_bEnd)
-			return TRUE;
-
-		BOOL bWaitOk = FALSE;
-		DWORD dwRet = 0;
-		while (!bWaitOk && (dwRet = MsgWaitForMultipleObjects(1, &m_hWaitEvent, FALSE, dwTimeout, QS_POSTMESSAGE | QS_SENDMESSAGE)) != WAIT_TIMEOUT)
-		{
-			// 停止事件
-			if (dwRet == WAIT_OBJECT_0)
-				break;
-
-			MSG msg;
-			while (!PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-				continue;
-
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-
-		return SUCCEEDED(m_hFinalResult);
-	}
-	DWORD GetRetCode()
-	{
-		return m_dwRetCode;
-	}
-	STDMETHODIMP Authenticate(
-		HWND *phwnd,
-		LPWSTR *pszUsername,
-		LPWSTR *pszPassword)
-	{
-		return S_OK;
-	}
-protected:
-	BOOL m_bEnd;
-	HRESULT m_hFinalResult;
-	DWORD m_cRef;
-	BINDVERB m_dwAction;
-	HGLOBAL m_hDataToPost;
-	DWORD m_cbDataToPost;
-	DWORD m_dwRetCode;
-	HANDLE m_hWaitEvent;
-protected:
-	CComPtr<IStream> m_spStream;
-};
-
-class CUrlMonToBufAdapter : public CUrlMonAdapter
-{
-public:
-	STDMETHODIMP OnDataAvailable(DWORD grfBSCF, DWORD dwSize, FORMATETC* pformatetc, STGMEDIUM* pstgmed)
-	{
-		HRESULT hr = S_OK;
-		if (BSCF_FIRSTDATANOTIFICATION & grfBSCF)
-		{
-			if (!m_spStream && pstgmed->tymed == TYMED_ISTREAM)
-				m_spStream = pstgmed->pstm;
-		}
-		if (m_spStream)
-		{
-			DWORD dwTotalRead = m_strBuf.GetLength();
-			do
-			{
-				int iRead = dwSize - dwTotalRead;
-				if (iRead < 0x1000)
-					iRead = 0x1000;
-				else if (iRead > 0xA00000)
-					iRead = 0xA00000;
-				BYTE *pBuffer = (BYTE *)m_strBuf.GetBuffer(dwTotalRead + iRead) + dwTotalRead;
-				DWORD dwActuallyRead = 0;
-				hr = m_spStream->Read(pBuffer, iRead, &dwActuallyRead);
-				dwTotalRead += dwActuallyRead;
-				m_strBuf.ReleaseBufferSetLength(dwTotalRead);
-			} while (!(hr == E_PENDING || hr == S_FALSE) && SUCCEEDED(hr));
-		}
-		return hr;
-	}
-public:
-	CStringA m_strBuf;
-};
 
 void CDumpAnalyze::Reset()
 {
@@ -397,7 +160,6 @@ void CDumpAnalyze::AnalyzeDumpThread()
 			AnalyzeDump(dump_info, dumpPath);
 		}
 	}
-
 }
 
 void CDumpAnalyze::WorkImpl()
@@ -454,6 +216,15 @@ void CDumpAnalyze::WorkImpl()
 		InitDownloadFolder(foler, date_.c_str(), from);
 		g_szWorkingFolder = foler;
 
+		BOOL bUseTransaction = TRUE;
+		if(CCommandLine::getInstance().hasOption(L"no_use_transaction"))
+			bUseTransaction = FALSE;
+
+		if (m_pSqliteDb && bUseTransaction)
+		{
+			int iRet = sqlite3_exec(m_pSqliteDb, "BEGIN TRANSACTION", NULL, NULL, NULL);
+		}
+
 		int nThreadCount = 1;
 		std::wstring thread_count_cmd;
 		CCommandLine::getInstance().getOption(L"thread", thread_count_cmd);
@@ -479,6 +250,10 @@ void CDumpAnalyze::WorkImpl()
 			t.join();
 		}
 
+		if (m_pSqliteDb && bUseTransaction)
+		{
+			int iRet = sqlite3_exec(m_pSqliteDb, "COMMIT", NULL, NULL, NULL);
+		}
 
 		OutputResult(foler);
 
@@ -496,20 +271,24 @@ void CDumpAnalyze::InitDownloadFolder(std::string& strFloder, const wchar_t* str
 	wchar_t szFolder[MAX_PATH] = { 0 };
 	GetModuleFileName(NULL, szFolder, MAX_PATH);
 	PathRemoveFileSpec(szFolder);
-	PathAppend(szFolder, from.c_str());
+	m_strSqliteDb = szFolder;
+	m_strSqliteDb += L"\\DumpAnalyze.db3";
 
+	PathAppend(szFolder, from.c_str());
 	PathAddBackslash(szFolder);
 
 	CString strFolder;
-
 	SYSTEMTIME time;
 	GetLocalTime(&time);
 	
 	strFolder.Format(L"%s%04d-%02d-%02d %02d-%02d-%02d", szFolder, time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
+	m_strSqliteTbl.Format("t_%ls_%04d-%02d-%02d_%02d-%02d-%02d", from.c_str(), time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
 	
 	strFolder += L"\\";
 	SHCreateDirectory(NULL, strFolder);
 	strFloder = (CW2A)strFolder;
+
+	InitDbAndFlagDlls();
 }
 
 std::string CDumpAnalyze::DumploadAndUnzipDump(const DUMP_INFO & dump_info, std::string& path,std::string& folder)
@@ -566,7 +345,7 @@ BOOL CDumpAnalyze::AnalyzeDump(const DUMP_INFO & dump_info, std::string& path)
 	if (!symbol_path.empty())
 	{
 		CStringA szSymbolCmd;
-		szSymbolCmd.Format(" -y \"%s\"", CW2A(symbol_path.c_str()));
+		szSymbolCmd.Format(" -y \"%s\"", (LPCSTR)CW2A(symbol_path.c_str()));
 		strCmdLine += szSymbolCmd;
 	}
 
@@ -619,69 +398,275 @@ BOOL CDumpAnalyze::AnalyzeDump(const DUMP_INFO & dump_info, std::string& path)
 		}
 	}
 
+	CStringA strDll;
 	CStringA strTag;
 	std::list<CStringA>::iterator iter2 = listLines.begin();
 	while (iter2 != listLines.end())
 	{
-		CStringA strLine = *iter2;
-		strTag += strLine.Mid(18);
+		const CStringA & strLine = *iter2;
+		LPSTR pEndNum = NULL;
+		strtoul(strLine, &pEndNum, 16);
+		//
+		if (pEndNum && 8==(pEndNum - (LPCSTR)strLine))
+		{
+			LPCSTR szPureStack = (LPCSTR)strLine + 18;
+			strTag += szPureStack;
+			if (strDll.IsEmpty())
+				PeekDllFromPureStack(szPureStack, strDll);
+		}
+		else
+		{
+			strTag += strLine;
+		}
 		strTag += "\r\n";
 		iter2++;
 	}
-	//CStringA strTag = strCallStack.Left(18);
-	//if (strTag.Left(1).CompareNoCase("0") != 0)
-	//{
-	//	ATLASSERT(FALSE);
-	//}
-	//else
-	//{
-	//	strTag = strCallStack;
-	//}
-	ArrangeDumpInfo(strTag, strCallStack, path.c_str(), dump_info);
+
+	// tag 算一个哈希值，方便比较及存储。
+	strTag = MD5( (LPCSTR)strTag ).toString().c_str();
+
+	ArrangeDumpInfo(strDll, strTag, strCallStack, path.c_str(), dump_info);
 	return TRUE;
 }
 
-void CDumpAnalyze::ArrangeDumpInfo(CStringA strTag, CStringA strCallStack, CStringA strPath, const DUMP_INFO & dump_info)
+void CDumpAnalyze::PeekDllFromPureStack(LPCSTR szPureStack, CStringA & strDll)
+{
+	while ('\x20' == szPureStack[0])
+		++szPureStack;
+
+	LPCSTR szFind = strpbrk(szPureStack, "!+");
+	if (!szFind)
+		return;
+
+	strDll.SetString(szPureStack, (szFind - szPureStack));
+	if (strDll.IsEmpty())
+		return;
+
+	strDll.MakeLower();
+	const CStringA strDllTmp = strDll;
+	
+	if( !PeekDllFromPureStackInternal(strDll) )
+		return;
+
+	do
+	{
+		szFind = strrchr((LPCSTR)strDllTmp, '_');
+		if (!szFind)
+			break;
+
+		LPSTR szFindEnd = NULL;
+		if (0 == strtoul(szFind + 1, &szFindEnd, 16) || !szFindEnd || 9 != (szFindEnd - szFind))
+			break;
+
+		strDll = strDllTmp.Left(strDllTmp.GetLength() - 9);
+		if (!PeekDllFromPureStackInternal(strDll))
+			return;
+
+	} while (0);
+
+	//非标准模块，用它
+	strDll = strDllTmp;
+	SetDllFlag(strDll, DLL_FLAG_USER);
+}
+
+BOOL CDumpAnalyze::PeekDllFromPureStackInternal(CStringA & strDll)
+{
+	DLL_FLAG dllFlag = GetDllFlag(strDll);
+	if (DLL_FLAG_KNOWN == dllFlag)
+	{
+		strDll.Empty();
+		return FALSE;
+	}
+	else if(DLL_FLAG_USER == dllFlag)
+	{
+		//用它
+		return FALSE;
+	}
+
+	CA2W a2wDll(strDll, CP_ACP);
+	WCHAR szBufferFile[MAX_PATH] = { 0 };
+	if (0 == SearchPathW(NULL, a2wDll, L".dll", MAX_PATH, szBufferFile, NULL))
+	{
+		return TRUE;
+	}
+
+	CStringW strCompanyName;
+	if (!VersionHelper::GetFileVersionQueryKey(szBufferFile, L"CompanyName", strCompanyName))
+	{
+		//视作未知模块，用它
+		SetDllFlag(strDll, DLL_FLAG_USER);
+		return FALSE;
+	}
+
+	if ( !StrStrIW(strCompanyName, L"Microsoft") )
+	{
+		//非微软模块，用它
+		SetDllFlag(strDll, DLL_FLAG_USER);
+		return FALSE;
+	}
+
+	SetDllFlag(strDll, DLL_FLAG_KNOWN);
+	strDll.Empty();
+	return FALSE;
+}
+
+void CDumpAnalyze::InitDbAndFlagDlls()
+{
+	std::lock_guard<std::mutex> lock(m_lockFlagDlls);
+
+	if( m_pSqliteDb )
+		return;
+
+	int iRet = sqlite3_open( CW2A(m_strSqliteDb, CP_UTF8), &m_pSqliteDb);
+	if(SQLITE_OK != iRet)
+	{
+		if( m_pSqliteDb )
+		{
+			sqlite3_close(m_pSqliteDb);
+			m_pSqliteDb = NULL;
+		}
+		return;
+	}
+
+	iRet = sqlite3_exec(m_pSqliteDb, 
+		"create table if not exists [t_flag_dlls]( dll_name varchar(260) PRIMARY KEY, dll_flag integer )", 
+		NULL, NULL, NULL);
+	if(SQLITE_OK != iRet)
+		return;
+
+	iRet = sqlite3_exec(m_pSqliteDb, 
+		"create table if not exists [t_tag_call_stack]( tag varchar(260) PRIMARY KEY, call_stack integer )", 
+		NULL, NULL, NULL);
+	if(SQLITE_OK != iRet)
+		return;
+
+	CStringA strSql;
+	strSql.Format(
+		"CREATE TABLE if not exists [%s]( dll_name varchar(260), ver varchar(32), tag varchar(260), dump_path varchar(260), reserved varchar(260) )",
+		(LPCSTR)m_strSqliteTbl);
+	iRet = sqlite3_exec(m_pSqliteDb, strSql, NULL, NULL, NULL);
+	if(SQLITE_OK != iRet)
+		return;
+
+	//初始化模块类型列表
+	struct ExecFlagDllsCallback
+	{
+		static int Callback(void *para, int n_column, char **column_value, char **column_name)
+		{
+			map<CStringA, DLL_FLAG> * pMapFlagDlls = (map<CStringA, DLL_FLAG> *)para;
+			
+			if(2 != n_column)
+				return SQLITE_ERROR;
+
+			if(column_value[0] && column_value[1])
+			{
+				(*pMapFlagDlls)[ column_value[0] ] = (DLL_FLAG)strtol(column_value[1], NULL, 10);
+			}
+			return SQLITE_OK;
+		}
+	};
+
+	iRet = sqlite3_exec(m_pSqliteDb, 
+		"select DISTINCT dll_name, dll_flag from t_flag_dlls", 
+		&ExecFlagDllsCallback::Callback, &m_mapFlagDlls, NULL);
+}
+
+DLL_FLAG CDumpAnalyze::GetDllFlag(const CStringA &strDll) const
+{
+	std::lock_guard<std::mutex> lock(m_lockFlagDlls);
+
+	map<CStringA,DLL_FLAG>::const_iterator itrFind = m_mapFlagDlls.find(strDll);
+	if(itrFind != m_mapFlagDlls.end())
+		return itrFind->second;
+
+	return DLL_FLAG_NONE;
+}
+
+bool CDumpAnalyze::SetDllFlag(const CStringA &strDll, DLL_FLAG dllFlag)
+{
+	if(DLL_FLAG_NONE == dllFlag)
+		return false;
+
+	std::lock_guard<std::mutex> lock(m_lockFlagDlls);
+
+	bool bInsert = m_mapFlagDlls.insert( make_pair(strDll, dllFlag) ).second;
+	if( bInsert && m_pSqliteDb )
+	{
+		CStringA strSql;
+		strSql.Format(
+			"insert or replace into t_flag_dlls values(\"%s\", %d)",
+			(LPCSTR)strDll, dllFlag);
+		int iRet = sqlite3_exec(m_pSqliteDb, strSql, NULL, NULL, NULL);
+	}
+	return bInsert;
+}
+
+void CDumpAnalyze::ArrangeDumpInfo(const CStringA &strDll, const CStringA &strTag, const CStringA &strCallStack, const CStringA &strPath, const DUMP_INFO & dump_info)
 {
 	std::lock_guard<std::mutex> lock(m_resultMutex);
 
-	VER_TAG_RESULT_ITERATOR it_tag_result = ver_tag_result_.find(dump_info.ver);
-	if (it_tag_result == ver_tag_result_.end()){
+	// 这个容器 m_mapVerTagResult 用作按版本号分类。。
+	VER_TAG_RESULT_ITERATOR it_tag_result = m_mapVerTagResult.find(dump_info.ver);
+	if (it_tag_result == m_mapVerTagResult.end()) {
 		TAG_DUMP_RESULT tag_result;
 		tag_result[strTag].push_back(strTag);
 		tag_result[strTag].push_back(strPath);
-		ver_tag_result_[dump_info.ver] = tag_result;
+		m_mapVerTagResult[dump_info.ver] = tag_result;
 	}
 	else {
 		TAG_DUMP_RESULT &tag_result = it_tag_result->second;
 		TAG_DUMP_RESULT_ITERATOR it = tag_result.find(strTag);
-		if (it == tag_result.end()){
+		if (it == tag_result.end()) {
 			tag_result[strTag].push_back(strTag);
 		}
 		tag_result[strTag].push_back(strPath);
 	}
 
 
-	//第一个写tag，方便分类
- 	if (m_mapDumpResult.find(strTag) == m_mapDumpResult.end())
- 		m_mapDumpResult[strTag].push_back(strTag);
+	// 这个容器 m_mapDumpResult 用作展示整体情况，不区分版本
+	// 第一个写tag，方便分类
+	if (m_mapDumpResult.find(strTag) == m_mapDumpResult.end())
+		m_mapDumpResult[strTag].push_back(strTag);
 	m_mapDumpResult[strTag].push_back(strPath);
 
+	// 这个容器 m_mapCallStack 只是用于根据 tag 取 stacks
 	//<tag, callstack>
 	if (m_mapCallStack.find(strTag) == m_mapCallStack.end())
 		m_mapCallStack[strTag] = strCallStack;
+
+	// ==========================================================
+	// 以上的存储逻辑不去变动，为了更方便地实现各种查询分类功能，
+	// 以下使用数据库进行存储整理。
+	// ==========================================================
+
+	if( m_pSqliteDb )
+	{
+		CStringA strSql;
+		strSql.Format(
+			"insert into [%s] values( \"%s\", \"%s\", \"%s\", \"%s\", NULL )",
+			(LPCSTR)m_strSqliteTbl, (LPCSTR)strDll, dump_info.ver.c_str(), (LPCSTR)strTag, PathFindFileNameA(strPath) );
+		int iRet = sqlite3_exec(m_pSqliteDb, strSql, NULL, NULL, NULL);
+
+		CStringA strCallStackTmp = strCallStack;
+		strCallStackTmp.Replace("\"", "\"\"");
+		strSql.Format("insert or ignore into [t_tag_call_stack] values(\"%s\", \"%s\")",
+			(LPCSTR)strTag, (LPCSTR)strCallStackTmp);
+		iRet = sqlite3_exec(m_pSqliteDb, strSql, NULL, NULL, NULL);
+	}
 }
 
-bool SortByCount(list<CStringA>* pLeft, list<CStringA>* pRight)
+
+bool SortByCount(const list<CStringA>* pLeft, const list<CStringA>* pRight)
 {
 	return pLeft->size() > pRight->size();
 }
 
 
-void CDumpAnalyze::OutputResult(const std::string & folder)
+void CDumpAnalyze::OutputResult(const std::string & folder) const
 {
-	VER_TAG_RESULT_ITERATOR it = ver_tag_result_.begin();
-	for (; it != ver_tag_result_.end(); ++it)
+	//版本分类表
+	VER_TAG_RESULT::const_iterator it = m_mapVerTagResult.begin();
+	for (; it != m_mapVerTagResult.end(); ++it)
 	{
 		//3.0.0.1001-result.html
 		CStringA strHtmResult;
@@ -689,10 +674,18 @@ void CDumpAnalyze::OutputResult(const std::string & folder)
 		WriteResultHtml(strHtmResult, it->second);
 	}
 	
+	//总表 
 	CStringA strHtmResult;
 	strHtmResult.Format("%s\\%s", folder.c_str(), "result.html");
 	WriteResultHtml(strHtmResult, m_mapDumpResult);
+
+	//======================================================================
+	//模块分类表
+	WriteDllResultHtmls(folder);
 }
+
+
+
 
 #define HTML_HEAD "<!DOCTYPE html>\
 <html>\
@@ -703,14 +696,16 @@ void CDumpAnalyze::OutputResult(const std::string & folder)
 
 #define BODY_HEAD_END "</body></html>"
 
-void CDumpAnalyze::WriteResultHtml(CStringA strPath, TAG_DUMP_RESULT & tag_result)
+void CDumpAnalyze::WriteResultHtml(
+	const CStringA &strPath, 
+	const TAG_DUMP_RESULT & tag_result) const
 {
 	int nDumpCounts = 0;
-	std::list<list<CStringA>*> lstToSort;
-	std::map<CStringA, list<CStringA>>::iterator iter = tag_result.begin();
+	std::list< const list<CStringA>* > lstToSort;
+	std::map<CStringA, CStringAList >::const_iterator iter = tag_result.begin();
 	while (iter != tag_result.end())
 	{
-		lstToSort.push_back(&(iter->second));
+		lstToSort.push_back( &(iter->second));
 		nDumpCounts += (iter->second.size() - 1);
 		iter++;
 	}
@@ -725,26 +720,26 @@ void CDumpAnalyze::WriteResultHtml(CStringA strPath, TAG_DUMP_RESULT & tag_resul
 		szFrom += L" dump auto analyze result";
 
 		CStringA szHead;
-		szHead.Format(HTML_HEAD, CW2A(szFrom.c_str()));
+		szHead.Format(HTML_HEAD, (LPCSTR)CW2A(szFrom.c_str()));
 		fwrite(szHead, sizeof(char), szHead.GetLength(), pFile);
 
 		//1.counts
 		CStringA strCounts;
-		strCounts.Format("<body><h2>Analyzed  %d  dump<h2>", nDumpCounts);
+		strCounts.Format("<body><h2>Analyzed  %d  dump</h2>", nDumpCounts);
 		fwrite(strCounts, sizeof(char), strCounts.GetLength(), pFile);
 		//2 top20
 		int i = 0;
-		std::list<list<CStringA>*>::iterator iter = lstToSort.begin();
+		std::list<const list<CStringA>*>::const_iterator iter = lstToSort.begin();
 		while (iter != lstToSort.end() && i < MAX_SHOW_RANKS)
 		{
-			list<CStringA>* pList = *iter;
+			const list<CStringA>* pList = *iter;
 
 			CStringA strDesc;
-			strDesc.Format("<h4>Top %d: total counts = %d<h4>", i + 1, pList->size() - 1);
+			strDesc.Format("<h4>Top %d: total counts = %d</h4>", i + 1, pList->size() - 1);
 			fwrite(strDesc, sizeof(char), strDesc.GetLength(), pFile);
 			if (pList)
 			{
-				list<CStringA>::iterator iterDumpInfo = pList->begin();
+				list<CStringA>::const_iterator iterDumpInfo = pList->begin();
 				CStringA strTag;
 				CStringA strCallStack;
 				int nIndex = 0;
@@ -783,7 +778,6 @@ void CDumpAnalyze::WriteResultHtml(CStringA strPath, TAG_DUMP_RESULT & tag_resul
 	}
 	return;
 }
-
 
 void CDumpAnalyze::UpdateProcess(PROCESS_TYPE e, int nParam)
 {
@@ -859,3 +853,254 @@ unsigned int WINAPI CDumpAnalyze::WorkProc(LPVOID lpParameter)
 	return 0;
 }
 
+void CDumpAnalyze::WriteDllResultHtmls(const std::string & folder) const
+{
+	if( !m_pSqliteDb )
+		return;
+
+	typedef list<pair<CStringA, DWORD> >   CStringADwordMapList;
+
+	//查询模块概览：map<dll_name, dump_count>
+	CStringADwordMapList  mapDllDumps;
+
+	struct ExecDllDumpsCallback
+	{
+		static int Callback(void *para, int n_column, char **column_value, char **column_name)
+		{
+			CStringADwordMapList * pMapDllDumps = (CStringADwordMapList *)para;
+
+			if(2 != n_column)
+				return SQLITE_ERROR;
+
+			if(column_value[0] && column_value[1])
+			{
+				pMapDllDumps->push_back(CStringADwordMapList::value_type(column_value[0], strtoul(column_value[1], NULL, 10)) );
+			}
+			return SQLITE_OK;
+		}
+	};
+
+	CStringA strSql;
+	strSql.Format(
+		"select dll_name, count(*) as c from [%s] group by dll_name order by c desc",
+		(LPCSTR)m_strSqliteTbl);
+
+	int iRet = sqlite3_exec(m_pSqliteDb, strSql, 
+		&ExecDllDumpsCallback::Callback, &mapDllDumps, NULL);
+
+	DWORD dwTotalDumpCount = 0;
+	CStringADwordMapList::const_iterator itrDll = mapDllDumps.begin();
+	for (; mapDllDumps.end() != itrDll; ++itrDll)
+	{
+		dwTotalDumpCount += itrDll->second;
+	}
+
+	//输出
+	DWORD dwIndex = 0;
+	itrDll = mapDllDumps.begin();
+	for (; mapDllDumps.end() != itrDll; ++itrDll, ++dwIndex)
+	{
+		//dll-unknown-result.html
+		LPCSTR szDll = (itrDll->first.IsEmpty() ? "unknown" : (LPCSTR)itrDll->first);
+		CStringA strHtmResult;
+		strHtmResult.Format("%s\\dll-%03u-%s-%s", folder.c_str(), dwIndex, szDll, "result.html");
+		WriteDllResultHtml_Dll(strHtmResult, itrDll->first, itrDll->second, dwTotalDumpCount);
+	}
+}
+
+void CDumpAnalyze::WriteDllResultHtml_Dll( const CStringA &strHtmResult, const CStringA &strDll, DWORD dwDumpCount, DWORD dwTotalDumpCount) const
+{
+	typedef list<pair<CStringA, DWORD> >   CStringADwordMapList;
+
+	//查询版本概览：map<ver, dump_count>
+	CStringADwordMapList  mapVerDumps;
+
+	struct ExecVerDumpsCallback
+	{
+		static int Callback(void *para, int n_column, char **column_value, char **column_name)
+		{
+			CStringADwordMapList * pMapVerDumps = (CStringADwordMapList *)para;
+
+			if(2 != n_column)
+				return SQLITE_ERROR;
+
+			if(column_value[0] && column_value[1])
+			{
+				pMapVerDumps->push_back( CStringADwordMapList::value_type(column_value[0], strtoul(column_value[1], NULL, 10)) );
+			}
+			return SQLITE_OK;
+		}
+	};
+
+	CStringA strSql;
+	strSql.Format(
+		"select ver, count(*) as c from [%s] where dll_name=\"%s\" group by ver order by c desc",
+		(LPCSTR)m_strSqliteTbl, (LPCSTR)strDll);
+
+	int iRet = sqlite3_exec(m_pSqliteDb, strSql, 
+		&ExecVerDumpsCallback::Callback, &mapVerDumps, NULL);
+
+	//输出
+	CStringA strHtmlBuffer;
+	LPCSTR szHeadGmt = "<!DOCTYPE html>\
+		<html>\
+		<head><meta charset = \"utf-8\"><title>%s dump auto analyze result</title></head>\
+		<body>\
+		<h2>Crash in %s.dll, Analyzed %u dumps, total processed %u, rate equals %.2f%% </h2><br><br>";
+	strHtmlBuffer.Format(szHeadGmt, 
+		ToHtmlLPCSTR(PathFindFileNameA(strHtmResult)),
+		ToHtmlLPCSTR(strDll.IsEmpty() ? "<unknown>": (LPCSTR)strDll),
+		dwDumpCount, dwTotalDumpCount, 
+		(dwTotalDumpCount ? (double)dwDumpCount*100.0/dwTotalDumpCount : 0.0) );
+
+	CStringA strHtmlVerInfo;
+	DWORD dwIndex = 0;
+	CStringADwordMapList::const_iterator itrVer = mapVerDumps.begin();
+	for (; mapVerDumps.end() != itrVer; ++itrVer, ++dwIndex)
+	{
+		strHtmlVerInfo.Format("<h4>Top %u: Version = %s, Total count = %u</h4><br>",
+			(dwIndex+1), (LPCSTR)itrVer->first, itrVer->second);
+		strHtmlBuffer += strHtmlVerInfo;
+		WriteDllResultHtml_Ver(strHtmlBuffer, strDll, itrVer->first);
+		strHtmlBuffer += "<br>";
+	}
+
+	strHtmlBuffer += "</body></html>";
+
+	ofstream ofHtmResult(strHtmResult, ios_base::out);
+	if(ofHtmResult)
+		ofHtmResult << (LPCSTR)strHtmlBuffer << endl;
+}
+
+void CDumpAnalyze::WriteDllResultHtml_Ver( CStringA &strHtmlBuffer, const CStringA &strDll, const CStringA &strVer ) const
+{
+	//查询crash概览：map<tag, dump_count>
+	const size_t MAX_QUERY_TAG_COUNT  = 5;
+	const size_t MAX_QUERY_DUMP_COUNT = 2;
+
+	struct ExecTagDumpsParam
+	{
+		DWORD           dwTagCount;
+		CStringA        strCallStack;
+		set<CStringA>   setDumpPaths;
+	};
+
+	typedef list<pair<CStringA, ExecTagDumpsParam> >   CStringAParamMapList;
+	CStringAParamMapList  mapTagDumps;
+
+	struct ExecTagDumpsCallback
+	{
+		static int Callback(void *para, int n_column, char **column_value, char **column_name)
+		{
+			CStringAParamMapList * pMapTagDumps = (CStringAParamMapList *)para;
+
+			if(3 != n_column)
+				return SQLITE_ERROR;
+
+			ExecTagDumpsParam vParam;
+			vParam.dwTagCount = 0;
+
+			if(column_value[0] && column_value[1])
+			{
+				vParam.dwTagCount = strtoul(column_value[1], NULL, 10);
+			}
+
+			if (vParam.dwTagCount)
+			{
+				pMapTagDumps->push_back(CStringAParamMapList::value_type(column_value[0], vParam));
+
+				if (column_value[2])
+				{
+					set<CStringA> &setDumpPaths = pMapTagDumps->back().second.setDumpPaths;
+
+					CStringA strDumpPaths(column_value[2]);
+					LPSTR lpContext = NULL;
+					LPSTR lp = strtok_s(strDumpPaths.GetBuffer(), "|", &lpContext);
+					for (size_t ii = 0; lp; lp = strtok_s(NULL, "|", &lpContext), ++ii)
+					{
+						if (ii >= MAX_QUERY_DUMP_COUNT)
+							break;
+
+						setDumpPaths.insert(lp);
+					}
+				}
+			}
+
+			return SQLITE_OK;
+		}
+	};
+
+	CStringA strSql;
+	strSql.Format(
+		"select tag, count(*) as c, group_concat(dump_path, \"|\") from [%s] where dll_name=\"%s\" and ver=\"%s\" group by tag order by c desc limit %u",
+		(LPCSTR)m_strSqliteTbl, (LPCSTR)strDll, strVer, MAX_QUERY_TAG_COUNT);
+
+	int iRet = sqlite3_exec(m_pSqliteDb, strSql, 
+		&ExecTagDumpsCallback::Callback, &mapTagDumps, NULL);
+
+	//整理，先取一下堆栈信息
+	for (CStringAParamMapList::iterator itr = mapTagDumps.begin();
+		mapTagDumps.end() != itr; ++itr)
+	{
+		PeekCallStackFromTag(itr->first, itr->second.strCallStack);
+		strHtmlBuffer += "<pre>";
+		if( itr->second.strCallStack.IsEmpty() )
+		{
+			strHtmlBuffer += "Call stack tag = ";
+			strHtmlBuffer += itr->first;
+			strHtmlBuffer += " not found! \r\n";
+		}
+		else
+		{
+			strHtmlBuffer += ToHtmlStringA(itr->second.strCallStack);
+		}
+		strHtmlBuffer += "</pre>";
+
+		for(set<CStringA>::const_iterator itrDump = itr->second.setDumpPaths.begin();
+			itr->second.setDumpPaths.end() != itrDump; ++itrDump)
+		{
+			LPCSTR szFileName = (LPCSTR)( *itrDump );
+			CStringA strFileNameLnk;
+			strFileNameLnk.Format("<a href=\"./dump/%s\">%s</a><br>",
+				ToHtmlLPCSTR(szFileName), ToHtmlLPCSTR(szFileName) );
+			strHtmlBuffer += strFileNameLnk;
+		}
+
+		strHtmlBuffer += "<br>";
+	}
+}
+
+BOOL CDumpAnalyze::PeekCallStackFromTag( const CStringA &strTag, CStringA &strCallStack ) const
+{
+	if( !m_pSqliteDb )
+		return FALSE;
+
+	BOOL bRet = FALSE;
+	CStringA strSql;
+	strSql.Format("select call_stack from [t_tag_call_stack] where tag=\"%s\" limit 1", (LPCSTR)strTag);
+	LPSTR *ppTableResult = NULL;
+	int nCol = 0, nRow = 0;
+	if((SQLITE_OK == sqlite3_get_table(m_pSqliteDb, strSql, &ppTableResult, &nRow, &nCol, NULL)) && ppTableResult && (1 == nCol) && (1 == nRow) )
+	{
+		if( ppTableResult[nCol] )
+			strCallStack = ppTableResult[nCol];
+		else
+			strCallStack.Empty();
+		bRet = TRUE;
+	}
+
+	if(ppTableResult)
+		sqlite3_free_table(ppTableResult);
+	return bRet;
+}
+
+CStringA ToHtmlStringA(LPCSTR szText)
+{
+	CStringA strText(szText);
+	strText.Replace("&", "&amp;");
+	strText.Replace("<", "&lt;");
+	strText.Replace(">", "&gt;");
+	strText.Replace("\x20", "&nbsp;");
+	strText.Replace("\"", "&quot;");
+	return strText;
+}

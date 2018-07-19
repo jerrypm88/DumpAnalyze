@@ -8,6 +8,15 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <set>
+#include <map>
+using namespace std;
+#include <memory>
+#include <vector>
+#include <algorithm>
+#include "lib/sqlite3/sqlite3.h"
+
+
 
 #define MSG_UPDATE_PROCESS	(WM_USER + 5555)
 
@@ -21,6 +30,16 @@ enum PROCESS_TYPE
 	PT_ANALYZING,
 	PT_DONE,
 };
+
+
+enum DLL_FLAG
+{
+	DLL_FLAG_NONE,
+	DLL_FLAG_KNOWN,
+	DLL_FLAG_USER,
+};
+
+
 
 class CDumpAnalyze
 {
@@ -44,11 +63,11 @@ public:
 		std::string dump_file_path;
 	}DUMP_RESULT, *PDUMP_RESULT;
 
+	typedef list<CStringA>                        CStringAList;
+	typedef std::map<CStringA, CStringAList >  TAG_DUMP_RESULT;                    // map[tag]list[tag,path]
+	typedef std::map<CStringA, CStringAList >::iterator TAG_DUMP_RESULT_ITERATOR;
 
-	typedef std::map<CStringA, list<CStringA> >  TAG_DUMP_RESULT;
-	typedef std::map<CStringA, list<CStringA> >::iterator TAG_DUMP_RESULT_ITERATOR;
-
-	typedef std::map<std::string, TAG_DUMP_RESULT> VER_TAG_RESULT;
+	typedef std::map<std::string, TAG_DUMP_RESULT> VER_TAG_RESULT;                 // map[ver][tag]list[tag,path]
 	typedef VER_TAG_RESULT::iterator VER_TAG_RESULT_ITERATOR;
 
 protected:
@@ -58,33 +77,55 @@ protected:
 
 private:
 	void Reset();
-	
 	void WorkImpl();
 	BOOL ParseDumpUrls(std::string s);
 	std::string DumploadAndUnzipDump(const DUMP_INFO & dump_info,std::string& path,std::string& folder);
 	BOOL AnalyzeDump(const DUMP_INFO & dump_info, std::string& path);
 	void InitDownloadFolder(std::string& strFloder, const wchar_t* strAppendix, std::wstring& from);
-	void ArrangeDumpInfo(CStringA strTag, CStringA strCallStack, CStringA strPath, const DUMP_INFO & dump_info);
-	void OutputResult(const std::string & folder);
-	void WriteResultHtml(CStringA strPath, TAG_DUMP_RESULT & tag_result);
+	void ArrangeDumpInfo(const CStringA &strDll, const CStringA &strTag, const CStringA &strCallStack, const CStringA &strPath, const DUMP_INFO & dump_info);
+	void OutputResult(const std::string & folder) const;
 	void UpdateProcess(PROCESS_TYPE e, int nParam = 0);
+	void PeekDllFromPureStack(LPCSTR szPureStack, CStringA &strDll);
+	BOOL PeekDllFromPureStackInternal(CStringA &strDll);  //返回标志：是否需要继续搜索
+	BOOL PeekCallStackFromTag(const CStringA &strTag, CStringA &strCallStack) const;
+	void WriteResultHtml(
+		const CStringA &strPath, 
+		const TAG_DUMP_RESULT & tag_result) const;
+	void WriteDllResultHtmls(const std::string & folder) const;
+	void WriteDllResultHtml_Dll(const CStringA &strHtmResult, const CStringA &strDll, DWORD dwDumpCount, DWORD dwTotalDumpCount) const;
+	void WriteDllResultHtml_Ver(CStringA &strHtmlBuffer, const CStringA &strDll, const CStringA &strVer) const;
+
 private:
 	HANDLE m_hWorkThread = nullptr;
 
 	std::wstring date_;
-	std::list<PDUMP_INFO> m_lstDumpInfo;
+	std::list<PDUMP_INFO>  m_lstDumpInfo;
 	std::mutex             m_lstDumpUrlsMutex;
 	std::atomic_int        m_currentCount;
 
 	int m_nFailCounts = 0;
+	HWND	m_hWnd = NULL;	
+
+private:
+	mutable std::mutex                    m_resultMutex;
+	VER_TAG_RESULT                        m_mapVerTagResult;    //map[ver][tag][tag & dump]
+	std::map<CStringA, CStringAList>	  m_mapDumpResult;      //map[tag][tag & dump]
+	mutable std::map<CStringA, CStringA>  m_mapCallStack;       //map[tag][stack]
 	
+private:
+	mutable std::mutex                    m_lockFlagDlls;
+	map<CStringA, DLL_FLAG>               m_mapFlagDlls;
+	sqlite3 *                             m_pSqliteDb;
+	CStringW                              m_strSqliteDb;
+	CStringA                              m_strSqliteTbl;
 
-	VER_TAG_RESULT ver_tag_result_;
-
-	std::map<CStringA, list<CStringA>>		m_mapDumpResult;
-
-	std::map<CStringA, CStringA>			m_mapCallStack;
-	std::mutex                              m_resultMutex;
-	HWND	m_hWnd = NULL;			
-	
+protected:
+	void     InitDbAndFlagDlls();
+	DLL_FLAG GetDllFlag(const CStringA &strDll) const;
+	bool     SetDllFlag(const CStringA &strDll, DLL_FLAG dllFlag);
 };
+
+
+CStringA ToHtmlStringA(LPCSTR szText);
+
+#define ToHtmlLPCSTR(szText)   ((LPCSTR)ToHtmlStringA((szText)))

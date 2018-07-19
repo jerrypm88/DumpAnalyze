@@ -19,6 +19,9 @@
     <Filter Include="helper">
       <UniqueIdentifier>{358b8b3c-cdc4-4844-948e-2d993ce748bf}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Common">
+      <UniqueIdentifier>{3166bb18-f067-4bcf-9df0-16f799882a6e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -42,6 +45,9 @@
     <ClCompile Include="CommandLine.cpp">
       <Filter>helper</Filter>
     </ClCompile>
+    <ClCompile Include="md5_ex.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">
@@ -64,6 +70,15 @@
     </ClInclude>
     <ClInclude Include="CommandLine.h">
       <Filter>helper</Filter>
+    </ClInclude>
+    <ClInclude Include="Common\VersionHelpers.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="md5_ex.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Common\LdsDisableWow64FsRedirection.h">
+      <Filter>Common</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
