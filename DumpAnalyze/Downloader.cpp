@@ -529,13 +529,13 @@ void CDumpAnalyze::InitDbAndFlagDlls()
 	}
 
 	iRet = sqlite3_exec(m_pSqliteDb, 
-		"create table if not exists [t_flag_dlls]( dll_name varchar(260) PRIMARY KEY, dll_flag integer )", 
+		"create table if not exists [t_flag_dlls]( dll_name varchar(260) PRIMARY KEY, dll_flag integer, reserved varchar(260) )", 
 		NULL, NULL, NULL);
 	if(SQLITE_OK != iRet)
 		return;
 
 	iRet = sqlite3_exec(m_pSqliteDb, 
-		"create table if not exists [t_tag_call_stack]( tag varchar(260) PRIMARY KEY, call_stack integer )", 
+		"create table if not exists [t_tag_call_stack]( tag varchar(260) PRIMARY KEY, call_stack integer, tbl_name varchar(260) )", 
 		NULL, NULL, NULL);
 	if(SQLITE_OK != iRet)
 		return;
@@ -594,7 +594,7 @@ bool CDumpAnalyze::SetDllFlag(const CStringA &strDll, DLL_FLAG dllFlag)
 	{
 		CStringA strSql;
 		strSql.Format(
-			"insert or replace into t_flag_dlls values(\"%s\", %d)",
+			"insert or replace into t_flag_dlls values(\"%s\", %d, null )",
 			(LPCSTR)strDll, dllFlag);
 		int iRet = sqlite3_exec(m_pSqliteDb, strSql, NULL, NULL, NULL);
 	}
@@ -649,8 +649,8 @@ void CDumpAnalyze::ArrangeDumpInfo(const CStringA &strDll, const CStringA &strTa
 
 		CStringA strCallStackTmp = strCallStack;
 		strCallStackTmp.Replace("\"", "\"\"");
-		strSql.Format("insert or ignore into [t_tag_call_stack] values(\"%s\", \"%s\")",
-			(LPCSTR)strTag, (LPCSTR)strCallStackTmp);
+		strSql.Format("insert or ignore into [t_tag_call_stack] values(\"%s\", \"%s\", \"%s\" )",
+			(LPCSTR)strTag, (LPCSTR)strCallStackTmp, (LPCSTR)m_strSqliteTbl);
 		iRet = sqlite3_exec(m_pSqliteDb, strSql, NULL, NULL, NULL);
 	}
 }
@@ -903,7 +903,7 @@ void CDumpAnalyze::WriteDllResultHtmls(const std::string & folder) const
 		//dll-unknown-result.html
 		LPCSTR szDll = (itrDll->first.IsEmpty() ? "unknown" : (LPCSTR)itrDll->first);
 		CStringA strHtmResult;
-		strHtmResult.Format("%s\\dll-%03u-%s-%s", folder.c_str(), dwIndex, szDll, "result.html");
+		strHtmResult.Format("%s\\dll-%03u-%u-%s-%s", folder.c_str(), dwIndex, itrDll->second, szDll, "result.html");
 		WriteDllResultHtml_Dll(strHtmResult, itrDll->first, itrDll->second, dwTotalDumpCount);
 	}
 }
@@ -975,8 +975,8 @@ void CDumpAnalyze::WriteDllResultHtml_Dll( const CStringA &strHtmResult, const C
 void CDumpAnalyze::WriteDllResultHtml_Ver( CStringA &strHtmlBuffer, const CStringA &strDll, const CStringA &strVer ) const
 {
 	//≤È—Øcrash∏≈¿¿£∫map<tag, dump_count>
-	const size_t MAX_QUERY_TAG_COUNT  = 5;
-	const size_t MAX_QUERY_DUMP_COUNT = 2;
+	const size_t MAX_QUERY_TAG_COUNT  = 10;
+	const size_t MAX_QUERY_DUMP_COUNT = 3;
 
 	struct ExecTagDumpsParam
 	{
@@ -1043,7 +1043,9 @@ void CDumpAnalyze::WriteDllResultHtml_Ver( CStringA &strHtmlBuffer, const CStrin
 		mapTagDumps.end() != itr; ++itr)
 	{
 		PeekCallStackFromTag(itr->first, itr->second.strCallStack);
-		strHtmlBuffer += "<pre>";
+		CStringA str;
+		str.Format("<pre>dump count = %u\n\n", itr->second.dwTagCount);
+		strHtmlBuffer += str;
 		if( itr->second.strCallStack.IsEmpty() )
 		{
 			strHtmlBuffer += "Call stack tag = ";
