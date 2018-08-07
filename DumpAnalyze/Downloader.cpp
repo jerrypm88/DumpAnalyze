@@ -27,10 +27,14 @@ using namespace ATL;
 #pragma comment(lib,"libcurld.lib")
 #pragma comment(lib,"jsoncpp_d.lib")
 #pragma comment(lib,"zlib_d.lib")
+	#pragma comment(lib, "jsoncpp_d.lib")
+	#pragma comment(lib, "zlib_d.lib")
 #else
 #pragma comment(lib,"libcurl.lib")
 #pragma comment(lib,"jsoncpp.lib")
 #pragma comment(lib,"zlib.lib")
+	#pragma comment(lib, "jsoncpp.lib")
+	#pragma comment(lib, "zlib.lib")
 #endif // _DEBUG
 
 #pragma comment ( lib, "ws2_32.lib" )
@@ -40,6 +44,8 @@ using namespace ATL;
 #pragma comment ( lib, "sqlite3.lib" )
 #pragma comment(lib, "UrlMon.lib")
 #pragma comment(lib, "DbgHelp.lib")
+
+
 
 
 
