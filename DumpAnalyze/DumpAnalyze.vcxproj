@@ -216,7 +216,6 @@
     </Midl>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\%40program_source\DumpAnalyzeAdv\DumpAnalyze\WriteDllResultHtmlsDigestCallback.cpp" />
     <ClCompile Include="CommandLine.cpp" />
     <ClCompile Include="Downloader.cpp" />
     <ClCompile Include="DumpAnalyze.cpp" />
@@ -230,9 +229,9 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Utils.cpp" />
+    <ClCompile Include="WriteDllResultHtmlsDigestCallback.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\..\%40program_source\DumpAnalyzeAdv\DumpAnalyze\WriteDllResultHtmlsDigestCallback.h" />
     <ClInclude Include="CommandLine.h" />
     <ClInclude Include="Common\LdsDisableWow64FsRedirection.h" />
     <ClInclude Include="Common\VersionHelpers.h" />
@@ -243,6 +242,7 @@
     <ClInclude Include="resource.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="Utils.h" />
+    <ClInclude Include="WriteDllResultHtmlsDigestCallback.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="DumpAnalyze.rc" />
