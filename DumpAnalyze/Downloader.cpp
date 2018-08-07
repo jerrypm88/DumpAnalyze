@@ -909,7 +909,7 @@ void CDumpAnalyze::WriteDllResultHtmls(const std::string & folder) const
 		//dll-unknown-result.html
 		LPCSTR szDll = (itrDll->first.IsEmpty() ? "unknown" : (LPCSTR)itrDll->first);
 		CStringA strHtmResult;
-		strHtmResult.Format("%s\\dll-%03u-%u-%s-%s", folder.c_str(), dwIndex, itrDll->second, szDll, "result.html");
+		strHtmResult.Format("%s\\%03u-%u-%s-%s", folder.c_str(), dwIndex, itrDll->second, szDll, "result.html");
 		WriteDllResultHtml_Dll(strHtmResult, itrDll->first, itrDll->second, dwTotalDumpCount);
 	}
 }
