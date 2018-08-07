@@ -27,14 +27,10 @@ using namespace ATL;
 #pragma comment(lib,"libcurld.lib")
 #pragma comment(lib,"jsoncpp_d.lib")
 #pragma comment(lib,"zlib_d.lib")
-	#pragma comment(lib, "jsoncpp_d.lib")
-	#pragma comment(lib, "zlib_d.lib")
 #else
 #pragma comment(lib,"libcurl.lib")
 #pragma comment(lib,"jsoncpp.lib")
 #pragma comment(lib,"zlib.lib")
-	#pragma comment(lib, "jsoncpp.lib")
-	#pragma comment(lib, "zlib.lib")
 #endif // _DEBUG
 
 #pragma comment ( lib, "ws2_32.lib" )
@@ -203,7 +199,7 @@ void CDumpAnalyze::WorkImpl()
 	{
 		try
 		{
-			CTimeSpan span(1,0,0,0);
+			CTimeSpan span( (strDigest.empty() ? 1 : 0), 0,0,0);
 			CTime yesterday = tmCurrent - span;
 			CStringW strDate;
 			strDate.Format(L"%04d-%02d-%02d", yesterday.GetYear(), yesterday.GetMonth(), yesterday.GetDay());
