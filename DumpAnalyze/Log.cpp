@@ -195,7 +195,7 @@ namespace Utils
 			std::wstring szFrom = L"ldstray";
 			CCommandLine::getInstance().getOption(L"from", szFrom);
 			
-			PathAppend(szLogFile, CA2W(g_szWorkingFolder.c_str()));
+			PathAppend(szLogFile, CA2W(g_strWorkingFolder.c_str()));
 			PathAppend(szLogFile, std::wstring(szFrom + L".log.on").c_str());
 #ifndef _DEBUG
 			if (!PathFileExists(szLogFile))

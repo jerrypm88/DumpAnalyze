@@ -15,6 +15,9 @@ using namespace std;
 #include <vector>
 #include <algorithm>
 #include "lib/sqlite3/sqlite3.h"
+#include "WriteDllResultHtmlsDigestCallback.h"
+
+
 
 
 
@@ -39,6 +42,12 @@ enum DLL_FLAG
 	DLL_FLAG_USER,
 };
 
+
+struct DB_TABLE_INFO
+{
+	CStringA    strFrom;
+	CStringA    strTableName;
+};
 
 
 class CDumpAnalyze
@@ -80,10 +89,10 @@ private:
 	void WorkImpl();
 	BOOL ParseDumpUrls(std::string s);
 	std::string DumploadAndUnzipDump(const DUMP_INFO & dump_info,std::string& path,std::string& folder);
-	BOOL AnalyzeDump(const DUMP_INFO & dump_info, std::string& path);
-	void InitDownloadFolder(std::string& strFloder, const wchar_t* strAppendix, std::wstring& from);
+	BOOL AnalyzeDump(const DUMP_INFO & dump_info, const std::string& path);
+	void InitWrokingFolder(BOOL bIsDigest, std::string& strFloder, const wchar_t* strAppendix, const std::wstring& from);
 	void ArrangeDumpInfo(const CStringA &strDll, const CStringA &strTag, const CStringA &strCallStack, const CStringA &strPath, const DUMP_INFO & dump_info);
-	void OutputResult(const std::string & folder) const;
+	void OutputResult() const;
 	void UpdateProcess(PROCESS_TYPE e, int nParam = 0);
 	void PeekDllFromPureStack(LPCSTR szPureStack, CStringA &strDll);
 	BOOL PeekDllFromPureStackInternal(CStringA &strDll);  //返回标志：是否需要继续搜索
@@ -91,14 +100,21 @@ private:
 	void WriteResultHtml(
 		const CStringA &strPath, 
 		const TAG_DUMP_RESULT & tag_result) const;
-	void WriteDllResultHtmls(const std::string & folder) const;
-	void WriteDllResultHtml_Dll(const CStringA &strHtmResult, const CStringA &strDll, DWORD dwDumpCount, DWORD dwTotalDumpCount) const;
-	void WriteDllResultHtml_Ver(CStringA &strHtmlBuffer, const CStringA &strDll, const CStringA &strVer) const;
+	void WriteDllResultHtmls(WriteDllResultHtmlsCallback &vDllResultHtmlsCallback, 
+		const CStringA &strSqliteTbl) const;
+	void WriteDllResultHtml_Dll(WriteDllResultHtmlsCallback &vDllResultHtmlsCallback, 
+		const CStringA &strSqliteTbl, const CStringA &strHtmResult, const CStringA &strDll, DWORD dwDumpCount, DWORD dwTotalDumpCount) const;
+	void WriteDllResultHtml_Ver(WriteDllResultHtmlsCallback &vDllResultHtmlsCallback, 
+		const CStringA &strSqliteTbl, CStringA &strHtmlBuffer, const CStringA &strDll, const CStringA &strVer) const;
+	BOOL DoDigestResultHtmls(const std::wstring &strDigest);
+	BOOL DoCleanDb();
+	BOOL PeekDllVersionFromDump(const CStringA &strDll, const CStringA &strPath, __out CStringA &strVer) const;
 
 private:
 	HANDLE m_hWorkThread = nullptr;
 
-	std::wstring date_;
+	std::wstring           m_dateProcess;
+	CStringA               m_dateClean;
 	std::list<PDUMP_INFO>  m_lstDumpInfo;
 	std::mutex             m_lstDumpUrlsMutex;
 	std::atomic_int        m_currentCount;
@@ -118,14 +134,15 @@ private:
 	sqlite3 *                             m_pSqliteDb;
 	CStringW                              m_strSqliteDb;
 	CStringA                              m_strSqliteTbl;
+	multimap<CStringA, DB_TABLE_INFO>     m_mapDbTableListMap;
 
 protected:
-	void     InitDbAndFlagDlls();
+	void     InitDbAndFlagDlls(BOOL bCreateNewTable);
+	void     InitDbTableListMap();
+
+	template<class MyDbInfoMultiMap>
+	void     EnumDbTableList(MyDbInfoMultiMap &mapDbTableListMap, LPCSTR szCondExt) const;
+
 	DLL_FLAG GetDllFlag(const CStringA &strDll) const;
 	bool     SetDllFlag(const CStringA &strDll, DLL_FLAG dllFlag);
 };
-
-
-CStringA ToHtmlStringA(LPCSTR szText);
-
-#define ToHtmlLPCSTR(szText)   ((LPCSTR)ToHtmlStringA((szText)))

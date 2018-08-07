@@ -19,11 +19,11 @@ namespace Util
 
 	namespace Process
 	{
-		CStringA CreateProcessForOutput(LPCSTR lpFilePath, LPCSTR lpParameters, int nTimeOut = 10 * 60 * 1000);			//启动进程，获取输出结果，一般是命令行程序使用；
+		CStringA CreateProcessForOutput(BOOL bWaitForExit, LPCSTR lpFilePath, LPCSTR lpParameters, int nTimeOut = 10 * 60 * 1000);			//启动进程，获取输出结果，一般是命令行程序使用；
 	}
 
 	namespace STRING
 	{
-		std::list<CStringA> spliterString(CStringA src, CStringA spliter);
+		std::list<CStringA> spliterString(const CStringA &src, const CStringA &spliter);
 	}
 }

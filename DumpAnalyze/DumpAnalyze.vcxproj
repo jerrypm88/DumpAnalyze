@@ -216,6 +216,7 @@
     </Midl>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\%40program_source\DumpAnalyzeAdv\DumpAnalyze\WriteDllResultHtmlsDigestCallback.cpp" />
     <ClCompile Include="CommandLine.cpp" />
     <ClCompile Include="Downloader.cpp" />
     <ClCompile Include="DumpAnalyze.cpp" />
@@ -231,6 +232,7 @@
     <ClCompile Include="Utils.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\..\%40program_source\DumpAnalyzeAdv\DumpAnalyze\WriteDllResultHtmlsDigestCallback.h" />
     <ClInclude Include="CommandLine.h" />
     <ClInclude Include="Common\LdsDisableWow64FsRedirection.h" />
     <ClInclude Include="Common\VersionHelpers.h" />

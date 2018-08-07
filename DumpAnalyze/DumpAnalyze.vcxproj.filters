@@ -48,6 +48,9 @@
     <ClCompile Include="md5_ex.cpp">
       <Filter>Common</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\%40program_source\DumpAnalyzeAdv\DumpAnalyze\WriteDllResultHtmlsDigestCallback.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">
@@ -79,6 +82,9 @@
     </ClInclude>
     <ClInclude Include="Common\LdsDisableWow64FsRedirection.h">
       <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\%40program_source\DumpAnalyzeAdv\DumpAnalyze\WriteDllResultHtmlsDigestCallback.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

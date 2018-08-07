@@ -42,12 +42,13 @@ LRESULT CMainDlg::OnInitDialog(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam
 
 	CCommandLine::getInstance().parse(GetCommandLine());
 
-	if (CCommandLine::getInstance().hasOption(L"from") &&
-		CCommandLine::getInstance().hasOption(L"url"))
+	const BOOL bHasUrl = 
+		(CCommandLine::getInstance().hasOption(L"from") &&
+		CCommandLine::getInstance().hasOption(L"url"));
+	if(bHasUrl || CCommandLine::getInstance().hasOption(L"digest"))
 	{
 		Start();
 	}
-	
 
 	return TRUE;
 }
@@ -133,7 +134,9 @@ void CMainDlg::UpdateProcessImpl(PROCESS_TYPE type, int nPrama)
 		m_infoList.InsertString(m_infoList.GetCount(),strOutput);
 	}
 
-	if (type == PT_DONE && CCommandLine::getInstance().hasOption(L"from"))
+	if (type == PT_DONE 
+		&&
+		(CCommandLine::getInstance().hasOption(L"from") || CCommandLine::getInstance().hasOption(L"digest")) )
 	{
 		PostMessage(WM_CLOSE);
 	}

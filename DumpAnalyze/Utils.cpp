@@ -232,7 +232,7 @@ BOOL Util::File::GetFileList(std::string& strZipFile, vector<std::string>& vecFi
 	return TRUE;
 }
 
-CStringA Util::Process::CreateProcessForOutput(LPCSTR lpFilePath, LPCSTR lpParameters, int nTimeOut /*= 60 * 1000*/)
+CStringA Util::Process::CreateProcessForOutput(BOOL bWaitForExit, LPCSTR lpFilePath, LPCSTR lpParameters, int nTimeOut /*= 60 * 1000*/)
 {
 	if (NULL == lpFilePath)
 	{
@@ -257,8 +257,8 @@ CStringA Util::Process::CreateProcessForOutput(LPCSTR lpFilePath, LPCSTR lpParam
 	if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
 		goto clear;
 	}
-	STARTUPINFOA si;
-	PROCESS_INFORMATION pi;
+	STARTUPINFOA si = {0};
+	PROCESS_INFORMATION pi = {0};
 	si.cb = sizeof(STARTUPINFO);
 	GetStartupInfoA(&si);
 	si.hStdError = hWrite;
@@ -280,7 +280,6 @@ CStringA Util::Process::CreateProcessForOutput(LPCSTR lpFilePath, LPCSTR lpParam
 		ZeroMemory(buffer, sizeof(buffer));
 
 		//有的dump没法接受到命令，直接退出了
-
 	}
 
 clear:
@@ -289,44 +288,26 @@ clear:
 		CloseHandle(hRead);
 		hRead = nullptr;
 	}
-	::CloseHandle(pi.hProcess);
-	::CloseHandle(pi.hThread);
+	if( pi.hProcess && bWaitForExit )
+	{
+		::WaitForSingleObject(pi.hProcess, INFINITE);
+		::CloseHandle(pi.hProcess);
+	}
+	if(pi.hThread)
+		::CloseHandle(pi.hThread);
 	return strRet;
 }
 
-std::list<CStringA> Util::STRING::spliterString(CStringA src, CStringA spliter)
+std::list<CStringA> Util::STRING::spliterString(const CStringA & src, const CStringA & spliter)
 {
 	std::list<CStringA> ret;
-	//int nTotalLength = (int)strlen(src) + 1;
-	//LPSTR m_Str = new char[nTotalLength];
-	//if ( m_Str )
-	//{
-	//	StringCbCopyA(m_Str, nTotalLength * sizeof(char), src);
-	//	m_Str[nTotalLength - 1] = '\0';
-
-	//	LPSTR p = m_Str;
-	//	while (p)
-	//	{
-	//		ret.push_back(p);
-	//		if (p = strstr(p, spliter))
-	//		{
-	//			ZeroMemory(p, strlen(spliter) * sizeof(char));
-	//			p += strlen(spliter);
-	//		}
-	//	}
-	//	delete[] m_Str;
-	//	m_Str = NULL;
-	//}
 	CStringA strTemp = src;
-	int nPos = 0;
-	while (!strTemp.IsEmpty() && (nPos = strTemp.Find(spliter)) >= 0)
+
+	LPSTR lpContext = NULL;
+	for(LPSTR lp = strtok_s(strTemp.GetBuffer(), spliter, &lpContext); lp;
+		lp = strtok_s(NULL, spliter, &lpContext))
 	{
-		ret.push_back(strTemp.Left(nPos+ spliter.GetLength()));
-		strTemp = strTemp.Mid(nPos + spliter.GetLength());
+		ret.push_back( lp );
 	}
-	if (!strTemp.IsEmpty())
-	{
-		ret.push_back(strTemp);
-	}
-	return ret;
+	return std::move(ret);
 }
