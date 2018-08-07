@@ -1170,8 +1170,36 @@ void CDumpAnalyze::WriteDllResultHtml_Ver( WriteDllResultHtmlsCallback &vDllResu
 		{
 			LPCSTR szFileName = (LPCSTR)( *itrDump );
 			CStringA strFileNameLnk;
-			strFileNameLnk.Format("<a href=\"./dump/%s\">%s</a><br>",
-				ToHtmlLPCSTR(szFileName), ToHtmlLPCSTR(szFileName) );
+			if( strchr(szFileName, '/') )
+			{
+				do 
+				{
+					if( 't'!=szFileName[0] || '_'!=szFileName[1] )
+						break;
+
+					szFileName += 2;
+
+					LPCSTR lp = strchr(szFileName, '_');
+					if( !lp )
+						break;
+
+					CStringA strFrom(szFileName, (lp - szFileName));
+					strFileNameLnk.Format("<a href=\"../../%s/%s\">%s/%s</a><br>",
+						(LPCSTR)(strFrom), ToHtmlLPCSTR(lp + 1), 
+						(LPCSTR)(strFrom), ToHtmlLPCSTR(lp + 1) );
+				} while (0);
+
+				if( strFileNameLnk.IsEmpty() )
+				{
+					strFileNameLnk = (LPCSTR)( *itrDump );
+					strFileNameLnk += "<br>";
+				}
+			}
+			else
+			{
+				strFileNameLnk.Format("<a href=\"./dump/%s\">%s</a><br>",
+					ToHtmlLPCSTR(szFileName), ToHtmlLPCSTR(szFileName) );
+			}
 			strHtmlBuffer += strFileNameLnk;
 		}
 
@@ -1264,8 +1292,8 @@ BOOL CDumpAnalyze::DoDigestResultHtmls(const std::wstring &strDigest)
 	itr = mapDbTableListMap.begin();
 	for(; mapDbTableListMap.end() != itr; ++itr )
 	{
-		strSql.Format("insert into [%s] select * from [%s]", 
-			(LPCSTR)strSqliteTblTemp, (LPCSTR)itr->second.strTableName);
+		strSql.Format("insert into [%s] select dll_name, ver, tag, \"%s/dump/\"||dump_path, reserved from [%s]", 
+			(LPCSTR)strSqliteTblTemp, (LPCSTR)itr->second.strTableName, (LPCSTR)itr->second.strTableName);
 		iRet = sqlite3_exec(m_pSqliteDb, strSql, NULL, NULL, NULL);
 	}
 
