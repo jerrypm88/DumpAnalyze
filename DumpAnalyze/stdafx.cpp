@@ -7,4 +7,4 @@
 
 
 
-std::string g_szWorkingFolder;
+std::string g_strWorkingFolder;
