@@ -91,7 +91,7 @@ private:
 	std::string DumploadAndUnzipDump(const DUMP_INFO & dump_info,std::string& path,std::string& folder);
 	BOOL AnalyzeDump(const DUMP_INFO & dump_info, const std::string& path);
 	void InitWrokingFolder(BOOL bIsDigest, std::string& strFloder, const wchar_t* strAppendix, const std::wstring& from);
-	void ArrangeDumpInfo(const CStringA &strDll, const CStringA &strTag, const CStringA &strCallStack, const CStringA &strPath, const DUMP_INFO & dump_info);
+	void ArrangeDumpInfo(__inout CStringA &strDll, const CStringA &strTag, const CStringA &strCallStack, const CStringA &strPath, const DUMP_INFO & dump_info);
 	void OutputResult() const;
 	void UpdateProcess(PROCESS_TYPE e, int nParam = 0);
 	void PeekDllFromPureStack(LPCSTR szPureStack, CStringA &strDll);
@@ -108,7 +108,7 @@ private:
 		const CStringA &strSqliteTbl, CStringA &strHtmlBuffer, const CStringA &strDll, const CStringA &strVer) const;
 	BOOL DoDigestResultHtmls(const std::wstring &strDigest);
 	BOOL DoCleanDb();
-	BOOL PeekDllVersionFromDump(const CStringA &strDll, const CStringA &strPath, __out CStringA &strVer) const;
+	BOOL PeekDllVersionFromDump(__inout CStringA &strDll, const CStringA &strPath, __out CStringA &strVer) const;
 
 private:
 	HANDLE m_hWorkThread = nullptr;

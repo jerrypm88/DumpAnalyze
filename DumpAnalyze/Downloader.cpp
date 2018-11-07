@@ -676,7 +676,7 @@ bool CDumpAnalyze::SetDllFlag(const CStringA &strDll, DLL_FLAG dllFlag)
 	return bInsert;
 }
 
-void CDumpAnalyze::ArrangeDumpInfo(const CStringA &strDll, const CStringA &strTag, const CStringA &strCallStack, const CStringA &strPath, const DUMP_INFO & dump_info)
+void CDumpAnalyze::ArrangeDumpInfo(__inout CStringA &strDll, const CStringA &strTag, const CStringA &strCallStack, const CStringA &strPath, const DUMP_INFO & dump_info)
 {
 	std::lock_guard<std::mutex> lock(m_resultMutex);
 
@@ -716,19 +716,23 @@ void CDumpAnalyze::ArrangeDumpInfo(const CStringA &strDll, const CStringA &strTa
 
 	if( m_pSqliteDb )
 	{
-		CStringA strVer = "v";    //如果提取模块版本失败，则以 v+产品版本 表示。
+		CStringA strVer = "v";             // 如果提取模块版本失败，则以 v+产品版本 表示。
 		strVer += dump_info.ver.c_str();
-		if (!strDll.IsEmpty())
+		const BOOL bUnknownDll = strDll.IsEmpty();
+		if( PeekDllVersionFromDump(strDll, strPath, strVer) && bUnknownDll )
 		{
-			PeekDllVersionFromDump(strDll, strPath, strVer);
+			strDll.Insert(0, "unknown_");  // unknown_LdsIeView etc.
+			strDll.MakeLower();
 		}
 
 		CStringA strSql;
 		strSql.Format(
 			"insert into [%s] values( \"%s\", \"%s\", \"%s\", \"%s\", \"%s\" )",
-			(LPCSTR)m_strSqliteTbl, (LPCSTR)strDll, 
+			(LPCSTR)m_strSqliteTbl, 
+			(LPCSTR)strDll, 
 			(LPCSTR)strVer, 
-			(LPCSTR)strTag, PathFindFileNameA(strPath), 
+			(LPCSTR)strTag, 
+			PathFindFileNameA(strPath), 
 			dump_info.ver.c_str());
 		int iRet = sqlite3_exec(m_pSqliteDb, strSql, NULL, NULL, NULL);
 
@@ -1377,7 +1381,8 @@ void CDumpAnalyze::InitDbTableListMap()
 	EnumDbTableList(m_mapDbTableListMap, NULL);
 }
 
-BOOL CDumpAnalyze::PeekDllVersionFromDump( const CStringA &strDll, const CStringA &strPath, __out CStringA &strVer ) const
+// 获取模块版本信息，如果 strDll 为空，则获取主模块版本信息
+BOOL CDumpAnalyze::PeekDllVersionFromDump( __inout CStringA &strDll, const CStringA &strPath, __out CStringA &strVer ) const
 {
 	HANDLE hFile = CreateFileA(strPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if(INVALID_HANDLE_VALUE == hFile)
@@ -1415,11 +1420,23 @@ BOOL CDumpAnalyze::PeekDllVersionFromDump( const CStringA &strDll, const CString
 
 					PMINIDUMP_STRING pNameString = (PMINIDUMP_STRING)(lpFileData + rvaName);
 					CStringW strNameW( pNameString->Buffer, pNameString->Length/sizeof(WCHAR) );
-					PathRemoveExtensionW( strNameW.GetBuffer() );
-					strNameW.ReleaseBuffer();
 
-					if( wcsicmp( PathFindFileNameW(strNameW), strDllW) )
-						continue;
+					if( strDllW.IsEmpty() )
+					{
+						LPCWSTR szExt = PathFindExtensionW(strNameW);
+
+						if( _wcsicmp(szExt, L".exe") )
+							continue;
+					}
+					else
+					{
+						PathRemoveExtensionW( strNameW.GetBuffer() );
+						strNameW.ReleaseBuffer();
+						LPCWSTR szName = PathFindFileNameW(strNameW);
+
+						if( _wcsicmp(szName, strDllW) )
+							continue;
+					}
 
 					const VS_FIXEDFILEINFO * lpInfo = &pModList->Modules[ii].VersionInfo;
 					if (VS_FFI_SIGNATURE != lpInfo->dwSignature)
@@ -1429,6 +1446,14 @@ BOOL CDumpAnalyze::PeekDllVersionFromDump( const CStringA &strDll, const CString
 						HIWORD(lpInfo->dwFileVersionMS), LOWORD(lpInfo->dwFileVersionMS),
 						HIWORD(lpInfo->dwFileVersionLS), LOWORD(lpInfo->dwFileVersionLS));
 
+					if( strDllW.IsEmpty() )
+					{
+						PathRemoveExtensionW( strNameW.GetBuffer() );
+						strNameW.ReleaseBuffer();
+						LPCWSTR szName = PathFindFileNameW(strNameW);
+
+						strDll = CW2A(szName, CP_ACP);
+					}
 					bRet = TRUE;
 					break;
 				}
