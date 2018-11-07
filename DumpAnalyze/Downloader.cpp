@@ -1048,7 +1048,7 @@ void CDumpAnalyze::WriteDllResultHtml_Dll( WriteDllResultHtmlsCallback &vDllResu
 		<html>\
 		<head><meta charset = \"utf-8\"><title>%s dump auto analyze result</title></head>\
 		<body>\
-		<h2>Crash in %s.dll, Analyzed %u dumps, total processed %u, rate equals %.2f%% </h2><br><br>";
+		<h2>Crash in %s, Analyzed %u dumps, total processed %u, rate equals %.2f%% </h2><br><br>";
 	strHtmlBuffer.Format(szHeadGmt, 
 		ToHtmlLPCSTR(PathFindFileNameA(strHtmResult)),
 		ToHtmlLPCSTR(strDll.IsEmpty() ? "<unknown>": (LPCSTR)strDll),
