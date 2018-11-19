@@ -288,14 +288,10 @@ void CDumpAnalyze::WorkImpl()
 		}
 
 		OutputResult();
-		UpdateProcess(PT_DONE, 0);
-	}
-	else
-	{
-		UpdateProcess(PT_GET_DUMP_DONE,0);
 	}
 
 	DoCleanDb();
+	UpdateProcess(PT_DONE, 0);
 	return;
 }
 
