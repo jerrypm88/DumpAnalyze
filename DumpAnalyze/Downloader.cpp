@@ -134,6 +134,7 @@ void CDumpAnalyze::AnalyzeDumpThread()
 
 	while (true)
 	{
+		do
 		{
 			std::lock_guard<std::mutex> lock(m_lstDumpUrlsMutex);
 			if (m_lstDumpInfo.empty())
@@ -149,7 +150,7 @@ void CDumpAnalyze::AnalyzeDumpThread()
 				dump_info = *pInfo;
 				delete pInfo;
 			}
-		}
+		} while (0);
 
 		m_currentCount++;
 
@@ -523,10 +524,10 @@ void CDumpAnalyze::PeekDllFromPureStack(LPCSTR szPureStack, CStringA & strDll)
 			break;
 
 		LPSTR szFindEnd = NULL;
-		if (0 == strtoul(szFind + 1, &szFindEnd, 16) || !szFindEnd || 9 != (szFindEnd - szFind))
+		if ( 0 == strtoul(szFind + 1, &szFindEnd, 16) || !szFindEnd || *szFindEnd )
 			break;
 
-		strDll = strDllTmp.Left(strDllTmp.GetLength() - 9);
+		strDll = strDllTmp.Left( (szFind - (LPCSTR)(strDllTmp)) );
 		if (!PeekDllFromPureStackInternal(strDll))
 			return;
 
@@ -719,6 +720,11 @@ void CDumpAnalyze::ArrangeDumpInfo(__inout CStringA &strDll, const CStringA &str
 		{
 			strDll.Insert(0, "unknown_");  // unknown_LdsIeView etc.
 			strDll.MakeLower();
+		}
+
+		if (!strnicmp(strDll, "flash32_", 8))
+		{
+			strDll = "flash32_x_x_x_x";    // Flash整合在一块
 		}
 
 		CStringA strSql;

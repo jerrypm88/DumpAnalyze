@@ -118,9 +118,8 @@ private:
 	std::list<PDUMP_INFO>  m_lstDumpInfo;
 	std::mutex             m_lstDumpUrlsMutex;
 	std::atomic_int        m_currentCount;
-
-	int m_nFailCounts = 0;
-	HWND	m_hWnd = NULL;	
+	std::atomic_int        m_nFailCounts;
+	HWND	               m_hWnd = NULL;
 
 private:
 	mutable std::mutex                    m_resultMutex;
