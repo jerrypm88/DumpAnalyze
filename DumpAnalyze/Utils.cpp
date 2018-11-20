@@ -232,7 +232,7 @@ BOOL Util::File::GetFileList(std::string& strZipFile, vector<std::string>& vecFi
 	return TRUE;
 }
 
-CStringA Util::Process::CreateProcessForOutput(BOOL bWaitForExit, LPCSTR lpFilePath, LPCSTR lpParameters, int nTimeOut /*= 60 * 1000*/)
+CStringA Util::Process::CreateProcessForOutput(BOOL bWaitForExit, LPCSTR lpFilePath, LPCSTR lpParameters, DWORD nTimeOut)
 {
 	if (NULL == lpFilePath)
 	{
@@ -266,10 +266,53 @@ CStringA Util::Process::CreateProcessForOutput(BOOL bWaitForExit, LPCSTR lpFileP
 	si.wShowWindow = SW_HIDE;
 	si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
 	if (!::CreateProcessA(NULL, szCommand
-		, NULL, NULL, TRUE, NULL, NULL, NULL, &si, &pi)) {
+		, NULL, NULL, TRUE, NULL, NULL, NULL, &si, &pi)) 
+	{
+		CloseHandle(hWrite);
 		goto clear;
 	}
 	CloseHandle(hWrite);
+	if (pi.hThread)
+	{
+		::CloseHandle(pi.hThread);
+		pi.hThread = NULL;
+	}
+
+	struct ProcessWorkItem
+	{
+		static DWORD WINAPI ThreadProc(LPVOID lpParam)
+		{
+			ProcessWorkItem *p = (ProcessWorkItem *)lpParam;
+			DWORD dwWaitResult = WaitForSingleObject(p->m_hProcess, p->m_nTimeOut);
+			if (WAIT_OBJECT_0 != dwWaitResult)
+			{
+				TerminateProcess(p->m_hProcess, -1);
+			}
+			::CloseHandle(p->m_hProcess);
+			delete p;
+			return 0;
+		}
+
+		DWORD   m_nTimeOut;
+		HANDLE  m_hProcess;
+	};
+
+	if (!bWaitForExit)  //建立监控线程防止同步读取匿名管道一直阻塞
+	{
+		ProcessWorkItem *p = new ProcessWorkItem;
+		p->m_hProcess = pi.hProcess;
+		p->m_nTimeOut = nTimeOut;
+		HANDLE hThread = CreateThread(NULL, 0, &ProcessWorkItem::ThreadProc, p, 0, NULL);
+		if (hThread)
+		{
+			CloseHandle(hThread);
+			pi.hProcess = NULL;
+		}
+		else
+		{
+			delete p;
+		}
+	}
 
 	char buffer[4096] = { 0 };
 	DWORD bytesRead;
@@ -278,8 +321,6 @@ CStringA Util::Process::CreateProcessForOutput(BOOL bWaitForExit, LPCSTR lpFileP
 			break;
 		strRet += buffer;
 		ZeroMemory(buffer, sizeof(buffer));
-
-		//有的dump没法接受到命令，直接退出了
 	}
 
 clear:
@@ -288,13 +329,20 @@ clear:
 		CloseHandle(hRead);
 		hRead = nullptr;
 	}
-	if( pi.hProcess && bWaitForExit )
+	if( pi.hProcess )
 	{
-		::WaitForSingleObject(pi.hProcess, INFINITE);
+		DWORD dwWaitResult = WAIT_TIMEOUT;
+		if(bWaitForExit)
+			dwWaitResult = ::WaitForSingleObject(pi.hProcess, nTimeOut);
+		else
+			dwWaitResult = ::WaitForSingleObject(pi.hProcess, 0);
+
+		if (WAIT_OBJECT_0 != dwWaitResult)
+		{
+			TerminateProcess(pi.hProcess, -1);
+		}
 		::CloseHandle(pi.hProcess);
 	}
-	if(pi.hThread)
-		::CloseHandle(pi.hThread);
 	return strRet;
 }
 
