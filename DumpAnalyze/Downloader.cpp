@@ -397,7 +397,8 @@ BOOL CDumpAnalyze::AnalyzeDump(const DUMP_INFO & dump_info, const std::string& p
 		strCmdLine += "\"";
 	}
 
-	CStringA strRet = Util::Process::CreateProcessForOutput(bIsWinDbgUsed, cdb_path_a.c_str(), strCmdLine);
+	CStringA strRet;
+	strRet = Util::Process::CreateProcessForOutput(bIsWinDbgUsed, cdb_path_a.c_str(), strCmdLine);
 	
 	if( bIsWinDbgUsed && PathFileExistsA(strLogA) )
 	{
@@ -418,33 +419,37 @@ BOOL CDumpAnalyze::AnalyzeDump(const DUMP_INFO & dump_info, const std::string& p
 			MoveFileExA(strLogA, NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
 	}
 
-	LOG << "----------------" << m_currentCount << "----------------" << "\r\n" << strRet << "\n";
-
-	int nStartPos = -1;
-	if ( strRet.Find("ChildEBP RetAddr") == -1 || (nStartPos = strRet.Find(DUMP_INFO_GAP)) == -1 )		//"*"
-		return FALSE;
-
-	int nQuitPos = strRet.Find("quit");
-	strRet = strRet.Left(nQuitPos);
-
-	CStringA strCallStack = strRet;
-	while (nStartPos != -1)
+	int iRetStart = strRet.Find("ChildEBP RetAddr");
+	CStringA strCallStack;
 	{
-		strCallStack = strCallStack.Mid(nStartPos + strlen(DUMP_INFO_GAP));
-		int nNexLine = strCallStack.Find("\n");
-		if (nNexLine != -1)
+		LOG << "----------------" << m_currentCount << "----------------" << "\r\n" << strRet << "\n";
+
+		int nStartPos = -1;
+		if ( iRetStart == -1 || (nStartPos = strRet.Find(DUMP_INFO_GAP)) == -1)	 //"*"
+			return FALSE;
+
+		int nQuitPos = strRet.Find("quit");
+		strRet = strRet.Left(nQuitPos);
+
+		strCallStack = strRet;
+		while (nStartPos != -1)
 		{
-			strCallStack = strCallStack.Mid(nNexLine + 1);
+			strCallStack = strCallStack.Mid(nStartPos + strlen(DUMP_INFO_GAP));
+			int nNexLine = strCallStack.Find("\n");
+			if (nNexLine != -1)
+			{
+				strCallStack = strCallStack.Mid(nNexLine + 1);
+			}
+			nStartPos = strCallStack.Find(DUMP_INFO_GAP);
 		}
-		nStartPos = strCallStack.Find(DUMP_INFO_GAP);
-	}
-	
-	if (strCallStack.Find("Executable search path") >= 0)
-	{
-		int nNexLine = strCallStack.Find("\n");
-		if (nNexLine != -1)
+
+		if (strCallStack.Find("Executable search path") >= 0)
 		{
-			strCallStack = strCallStack.Mid(nNexLine + 1);
+			int nNexLine = strCallStack.Find("\n");
+			if (nNexLine != -1)
+			{
+				strCallStack = strCallStack.Mid(nNexLine + 1);
+			}
 		}
 	}
 	strCallStack.Trim();
@@ -676,35 +681,35 @@ bool CDumpAnalyze::SetDllFlag(const CStringA &strDll, DLL_FLAG dllFlag)
 void CDumpAnalyze::ArrangeDumpInfo(__inout CStringA &strDll, const CStringA &strTag, const CStringA &strCallStack, const CStringA &strPath, const DUMP_INFO & dump_info)
 {
 	std::lock_guard<std::mutex> lock(m_resultMutex);
-
-	// 这个容器 m_mapVerTagResult 用作按版本号分类。。
-	VER_TAG_RESULT_ITERATOR it_tag_result = m_mapVerTagResult.find(dump_info.ver);
-	if (it_tag_result == m_mapVerTagResult.end()) {
-		TAG_DUMP_RESULT tag_result;
-		tag_result[strTag].push_back(strTag);
-		tag_result[strTag].push_back(strPath);
-		m_mapVerTagResult[dump_info.ver] = tag_result;
-	}
-	else {
-		TAG_DUMP_RESULT &tag_result = it_tag_result->second;
-		TAG_DUMP_RESULT_ITERATOR it = tag_result.find(strTag);
-		if (it == tag_result.end()) {
+	{
+		// 这个容器 m_mapVerTagResult 用作按版本号分类。。
+		VER_TAG_RESULT_ITERATOR it_tag_result = m_mapVerTagResult.find(dump_info.ver);
+		if (it_tag_result == m_mapVerTagResult.end()) {
+			TAG_DUMP_RESULT tag_result;
 			tag_result[strTag].push_back(strTag);
+			tag_result[strTag].push_back(strPath);
+			m_mapVerTagResult[dump_info.ver] = tag_result;
 		}
-		tag_result[strTag].push_back(strPath);
+		else {
+			TAG_DUMP_RESULT &tag_result = it_tag_result->second;
+			TAG_DUMP_RESULT_ITERATOR it = tag_result.find(strTag);
+			if (it == tag_result.end()) {
+				tag_result[strTag].push_back(strTag);
+			}
+			tag_result[strTag].push_back(strPath);
+		}
+
+		// 这个容器 m_mapDumpResult 用作展示整体情况，不区分版本
+		// 第一个写tag，方便分类
+		if (m_mapDumpResult.find(strTag) == m_mapDumpResult.end())
+			m_mapDumpResult[strTag].push_back(strTag);
+		m_mapDumpResult[strTag].push_back(strPath);
+
+		// 这个容器 m_mapCallStack 只是用于根据 tag 取 stacks
+		//<tag, callstack>
+		if (m_mapCallStack.find(strTag) == m_mapCallStack.end())
+			m_mapCallStack[strTag] = strCallStack;
 	}
-
-
-	// 这个容器 m_mapDumpResult 用作展示整体情况，不区分版本
-	// 第一个写tag，方便分类
-	if (m_mapDumpResult.find(strTag) == m_mapDumpResult.end())
-		m_mapDumpResult[strTag].push_back(strTag);
-	m_mapDumpResult[strTag].push_back(strPath);
-
-	// 这个容器 m_mapCallStack 只是用于根据 tag 取 stacks
-	//<tag, callstack>
-	if (m_mapCallStack.find(strTag) == m_mapCallStack.end())
-		m_mapCallStack[strTag] = strCallStack;
 
 	// ==========================================================
 	// 以上的存储逻辑不去变动，为了更方便地实现各种查询分类功能，
@@ -765,10 +770,13 @@ void CDumpAnalyze::OutputResult() const
 		WriteResultHtml(strHtmResult, it->second);
 	}
 	
-	//总表 
-	CStringA strHtmResult;
-	strHtmResult.Format("%s\\%s", g_strWorkingFolder.c_str(), "result.html");
-	WriteResultHtml(strHtmResult, m_mapDumpResult);
+	//总表
+	if (!m_mapDumpResult.empty())
+	{
+		CStringA strHtmResult;
+		strHtmResult.Format("%s\\%s", g_strWorkingFolder.c_str(), "result.html");
+		WriteResultHtml(strHtmResult, m_mapDumpResult);
+	}
 
 	//======================================================================
 	//模块分类表
@@ -1386,7 +1394,7 @@ void CDumpAnalyze::InitDbTableListMap()
 // 获取模块版本信息，如果 strDll 为空，则获取主模块版本信息
 BOOL CDumpAnalyze::PeekDllVersionFromDump( __inout CStringA &strDll, const CStringA &strPath, __out CStringA &strVer ) const
 {
-	HANDLE hFile = CreateFileA(strPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	HANDLE hFile = CreateFileA( strPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 	if(INVALID_HANDLE_VALUE == hFile)
 		return FALSE;
 
@@ -1420,7 +1428,16 @@ BOOL CDumpAnalyze::PeekDllVersionFromDump( __inout CStringA &strDll, const CStri
 					if(0 == rvaName)
 						continue;
 
+					// 有些dump文件格式非法或者被损坏，需作严格的校验
 					PMINIDUMP_STRING pNameString = (PMINIDUMP_STRING)(lpFileData + rvaName);
+					if (IsBadReadPtr(pNameString, sizeof(*pNameString))
+						||
+						IsBadReadPtr(pNameString->Buffer, pNameString->Length))
+					{
+						strDll = "bad_dump";
+						break;
+					}
+
 					CStringW strNameW( pNameString->Buffer, pNameString->Length/sizeof(WCHAR) );
 
 					if( strDllW.IsEmpty() )
