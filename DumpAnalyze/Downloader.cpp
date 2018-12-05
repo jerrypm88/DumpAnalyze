@@ -304,8 +304,8 @@ void CDumpAnalyze::InitWrokingFolder(BOOL bIsDigest, std::string& strFloder, con
 	m_strSqliteDb = szFolder;
 	m_strSqliteDb += L"\\DumpAnalyze.db3";
 
-	LPCWSTR const szFromPart = (bIsDigest ? L"digest" : from.c_str());
-	PathAppend(szFolder, szFromPart);
+	m_strFromPart = (bIsDigest ? L"digest" : from.c_str());
+	PathAppend(szFolder, m_strFromPart);
 	PathAddBackslash(szFolder);
 
 	CString strFolder;
@@ -313,7 +313,7 @@ void CDumpAnalyze::InitWrokingFolder(BOOL bIsDigest, std::string& strFloder, con
 	GetLocalTime(&time);
 	
 	strFolder.Format(L"%s%04d-%02d-%02d_%02d-%02d-%02d", szFolder, time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
-	m_strSqliteTbl.Format("t_%ls_%04d-%02d-%02d_%02d-%02d-%02d", szFromPart, time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
+	m_strSqliteTbl.Format("t_%ls_%04d-%02d-%02d_%02d-%02d-%02d", (LPCWSTR)m_strFromPart, time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
 	
 	strFolder += L"\\";
 	SHCreateDirectory(NULL, strFolder);
@@ -421,6 +421,7 @@ BOOL CDumpAnalyze::AnalyzeDump(const DUMP_INFO & dump_info, const std::string& p
 
 	int iRetStart = strRet.Find("ChildEBP RetAddr");
 	CStringA strCallStack;
+	do
 	{
 		LOG << "----------------" << m_currentCount << "----------------" << "\r\n" << strRet << "\n";
 
@@ -451,7 +452,7 @@ BOOL CDumpAnalyze::AnalyzeDump(const DUMP_INFO & dump_info, const std::string& p
 				strCallStack = strCallStack.Mid(nNexLine + 1);
 			}
 		}
-	}
+	} while (0);
 	strCallStack.Trim();
 
 	std::list<CStringA> listLines = Util::STRING::spliterString(strCallStack,"\n");
@@ -681,6 +682,7 @@ bool CDumpAnalyze::SetDllFlag(const CStringA &strDll, DLL_FLAG dllFlag)
 void CDumpAnalyze::ArrangeDumpInfo(__inout CStringA &strDll, const CStringA &strTag, const CStringA &strCallStack, const CStringA &strPath, const DUMP_INFO & dump_info)
 {
 	std::lock_guard<std::mutex> lock(m_resultMutex);
+	do
 	{
 		// 这个容器 m_mapVerTagResult 用作按版本号分类。。
 		VER_TAG_RESULT_ITERATOR it_tag_result = m_mapVerTagResult.find(dump_info.ver);
@@ -709,12 +711,8 @@ void CDumpAnalyze::ArrangeDumpInfo(__inout CStringA &strDll, const CStringA &str
 		//<tag, callstack>
 		if (m_mapCallStack.find(strTag) == m_mapCallStack.end())
 			m_mapCallStack[strTag] = strCallStack;
-	}
 
-	// ==========================================================
-	// 以上的存储逻辑不去变动，为了更方便地实现各种查询分类功能，
-	// 以下使用数据库进行存储整理。
-	// ==========================================================
+	} while (0);
 
 	if( m_pSqliteDb )
 	{
@@ -780,7 +778,7 @@ void CDumpAnalyze::OutputResult() const
 
 	//======================================================================
 	//模块分类表
-	WriteDllResultHtmlsDigestCallback vDllResultHtmlsCallback;
+	WriteDllResultHtmlsDigestCallback vDllResultHtmlsCallback(m_pSqliteDb, m_strFromPart);
 	WriteDllResultHtmls(vDllResultHtmlsCallback, m_strSqliteTbl);
 }
 
@@ -884,7 +882,7 @@ void CDumpAnalyze::UpdateProcess(PROCESS_TYPE e, int nParam)
 	::PostMessage(m_hWnd, MSG_UPDATE_PROCESS,(WPARAM)e,(LPARAM)nParam);
 }
 
-BOOL CDumpAnalyze::ParseDumpUrls(std::string s)
+BOOL CDumpAnalyze::ParseDumpUrls(const std::string &s)
 {
 	std::wstring dump_count = L"0";
 	std::wstring ver;
@@ -1313,7 +1311,7 @@ BOOL CDumpAnalyze::DoDigestResultHtmls(const std::wstring &strDigest)
 
 	iRet = sqlite3_exec(m_pSqliteDb, "COMMIT", NULL, NULL, NULL);
 
-	WriteDllResultHtmlsDigestCallback vDllResultHtmlsCallback;
+	WriteDllResultHtmlsDigestCallback vDllResultHtmlsCallback(m_pSqliteDb, m_strFromPart);
 	vDllResultHtmlsCallback.m_mapDbFromTimestamp.swap( mapDbFromTimestamp );
 
 	WriteDllResultHtmls(vDllResultHtmlsCallback, strSqliteTblTemp);
@@ -1357,7 +1355,13 @@ void CDumpAnalyze::EnumDbTableList(MyDbInfoMultiMap &mapDbTableListMap, LPCSTR s
 				return SQLITE_ERROR;
 
 			LPCSTR szTblName = column_value[0];
-			if(szTblName && stricmp(szTblName, "t_flag_dlls") && stricmp(szTblName, "t_tag_call_stack") )
+			if(szTblName 
+				&& 
+				stricmp(szTblName, "t_flag_dlls") 
+				&& 
+				stricmp(szTblName, "t_tag_call_stack")
+				&&
+				strnicmp(szTblName, OVERVIEW_TABLE, OVERVIEW_TABLE_SIZE))
 			{
 				LPCSTR lp1 = strchr(szTblName+2, '_');
 				if( !lp1 )

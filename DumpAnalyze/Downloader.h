@@ -87,7 +87,7 @@ protected:
 private:
 	void Reset();
 	void WorkImpl();
-	BOOL ParseDumpUrls(std::string s);
+	BOOL ParseDumpUrls(const std::string &s);
 	std::string DumploadAndUnzipDump(const DUMP_INFO & dump_info,std::string& path,std::string& folder);
 	BOOL AnalyzeDump(const DUMP_INFO & dump_info, const std::string& path);
 	void InitWrokingFolder(BOOL bIsDigest, std::string& strFloder, const wchar_t* strAppendix, const std::wstring& from);
@@ -112,7 +112,7 @@ private:
 
 private:
 	HANDLE m_hWorkThread = nullptr;
-
+	CStringW               m_strFromPart;
 	std::wstring           m_dateProcess;
 	CStringA               m_dateClean;
 	std::list<PDUMP_INFO>  m_lstDumpInfo;
