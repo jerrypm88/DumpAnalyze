@@ -228,6 +228,7 @@ void CDumpAnalyze::WorkImpl()
 		CComPtr<CUrlMonToBufAdapter> pAdapter = new CUrlMonToBufAdapter();
 
 		std::wstring url;
+
 		CCommandLine::getInstance().getOption(L"url", url);
 		BOOL bRet = pAdapter->Download(url.c_str(), (LPBYTE)(LPSTR)(LPCSTR)szPostA, szPostA.GetLength(), 60*1000);
 		if (bRet) 

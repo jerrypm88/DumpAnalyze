@@ -49,6 +49,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
 
 	//一开始就关掉重定位！
 	DISABLED_WOW64_FS_REDIRECTION();
+	LOG << "start dump analyzer";
 	int nRet = Run(lpstrCmdLine, nCmdShow);
 
 	_Module.Term();
