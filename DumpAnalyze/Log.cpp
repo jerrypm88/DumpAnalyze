@@ -189,13 +189,14 @@ namespace Utils
 		void initLog()
 		{
  			WCHAR szLogFile[MAX_PATH] = {};
-// 			GetModuleFileName(NULL, szLogFile, MAX_PATH);
-// 			PathRemoveFileSpec(szLogFile);
-// 
-			std::wstring szFrom = L"ldstray";
+ 			GetModuleFileName(NULL, szLogFile, MAX_PATH);
+ 			PathRemoveFileSpec(szLogFile);
+ 
+			std::wstring szFrom;
 			CCommandLine::getInstance().getOption(L"from", szFrom);
-			
-			PathAppend(szLogFile, CA2W(g_strWorkingFolder.c_str()));
+			if (szFrom.empty()) szFrom = L"ldstray";
+
+			//PathAppend(szLogFile, CA2W(g_strWorkingFolder.c_str()));
 			PathAppend(szLogFile, std::wstring(szFrom + L".log.on").c_str());
 #ifndef _DEBUG
 			if (!PathFileExists(szLogFile))
